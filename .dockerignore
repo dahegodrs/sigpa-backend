@@ -1,0 +1,12 @@
+.env
+.env.local
+credentials/
+_.stackdump
+_.pdf
+soat-prueba.pdf
+bash.exe.stackdump
+sigpa-backend
+.idea/
+.vscode/
+.git/
+.gitignore

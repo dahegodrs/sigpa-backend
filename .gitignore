@@ -1,0 +1,9 @@
+.env
+.env.local
+credentials/
+sigpa-backend
+*.exe
+*.stackdump
+*.pdf
+soat-prueba.pdf
+.idea/
