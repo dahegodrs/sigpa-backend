@@ -144,15 +144,18 @@ func (g *GoogleDriveService) SubirArchivo(ctx context.Context, carpetaID, nombre
 		return "", "", fmt.Errorf("error al subir archivo a Drive: %w", err)
 	}
 
-	if g.dominioInstitucional != "" {
-		_, err = g.svc.Permissions.Create(creado.Id, &drive.Permission{
-			Type:   "domain",
-			Role:   "reader",
-			Domain: g.dominioInstitucional,
-		}).SupportsAllDrives(true).Context(ctx).Do()
-		if err != nil {
-			fmt.Printf("advertencia: no se pudo asignar permiso de dominio al archivo %s: %v\n", creado.Id, err)
-		}
+	// Se asigna permiso "anyone/reader" para que el archivo pueda visualizarse
+	// desde el enlace directo sin necesidad de iniciar sesión con una cuenta
+	// de Google (por ejemplo, al abrir el PDF desde un celular sin sesión
+	// institucional activa). El ID del archivo es aleatorio e impredecible,
+	// por lo que solo quien tenga el enlace exacto (compartido desde SIGPA)
+	// puede acceder — no queda expuesto por búsqueda ni indexación.
+	_, err = g.svc.Permissions.Create(creado.Id, &drive.Permission{
+		Type: "anyone",
+		Role: "reader",
+	}).SupportsAllDrives(true).Context(ctx).Do()
+	if err != nil {
+		fmt.Printf("advertencia: no se pudo asignar permiso público de lectura al archivo %s: %v\n", creado.Id, err)
 	}
 
 	return creado.Id, creado.WebViewLink, nil
