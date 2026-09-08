@@ -92,3 +92,22 @@ func (s *DocumentoService) ListarGlobal(ctx context.Context, f repository.Docume
 func (s *DocumentoService) ConteoPorTipo(ctx context.Context, organizationID int) ([]repository.ConteoPorTipoDocumento, error) {
 	return s.repo.ConteoPorTipo(ctx, organizationID)
 }
+
+// EliminarLogico marca el documento como eliminado y registra el evento en
+// el historial de cambios, sin borrar nada de Google Drive.
+func (s *DocumentoService) EliminarLogico(ctx context.Context, organizationID, documentoID, usuarioID int) error {
+	if err := s.repo.EliminarLogico(ctx, organizationID, documentoID, usuarioID); err != nil {
+		return err
+	}
+
+	_ = s.historialRepo.Registrar(ctx, &models.HistorialCambio{
+		OrganizationID:  organizationID,
+		Entidad:         "documento",
+		EntidadID:       documentoID,
+		UsuarioID:       &usuarioID,
+		Accion:          "ELIMINACION",
+		CampoModificado: strPtr("eliminado"),
+	})
+
+	return nil
+}

@@ -11,6 +11,7 @@ import (
 	"github.com/alcaldia/sigpa-backend/internal/models"
 	"github.com/alcaldia/sigpa-backend/internal/repository"
 	"github.com/alcaldia/sigpa-backend/internal/service"
+	"github.com/alcaldia/sigpa-backend/pkg/apperrors"
 	"github.com/alcaldia/sigpa-backend/pkg/response"
 )
 
@@ -289,4 +290,30 @@ func (h *DocumentoHandler) ConteoPorTipo(c *gin.Context) {
 		return
 	}
 	response.Success(c, http.StatusOK, conteo)
+}
+
+// DELETE /api/v1/vehiculos/:id/documentos/:docId
+// Elimina lógicamente un documento (no borra nada de Google Drive ni de la
+// base de datos). Solo Administrador puede ejecutar esta acción — se valida
+// en el router con middleware.RequireRoles.
+func (h *DocumentoHandler) Eliminar(c *gin.Context) {
+	orgID := middleware.OrganizationID(c)
+	userID := middleware.UserID(c)
+
+	docID, err := strconv.Atoi(c.Param("docId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "id de documento inválido")
+		return
+	}
+
+	if err := h.service.EliminarLogico(c.Request.Context(), orgID, docID, userID); err != nil {
+		if err == apperrors.ErrNotFound {
+			response.Error(c, http.StatusNotFound, "documento no encontrado")
+			return
+		}
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	response.Success(c, http.StatusOK, gin.H{"eliminado": true})
 }

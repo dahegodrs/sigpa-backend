@@ -81,6 +81,8 @@ func Setup(cfg *config.Config, corsOrigins []string, h Handlers) *gin.Engine {
 					middleware.RequireRoles("Administrador", "Dependencia"), h.Documento.SubirNuevaVersion)
 				vehiculos.POST("/:id/documentos/notificar",
 					middleware.RequireRoles("Administrador", "Dependencia"), h.Documento.NotificarDocumento)
+				vehiculos.DELETE("/:id/documentos/:docId",
+					middleware.RequireRoles("Administrador"), h.Documento.Eliminar)
 			}
 
 			dependencias := protected.Group("/dependencias")

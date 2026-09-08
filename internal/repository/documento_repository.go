@@ -22,7 +22,8 @@ const documentoSelectBase = `
 	SELECT
 		d.id, d.organization_id, d.vehiculo_id, d.tipo_documento_id, td.nombre AS tipo_documento_nombre,
 		d.fecha_expedicion, d.fecha_vencimiento, d.estado_documento, d.archivo_url, d.archivo_drive_id,
-		d.nombre_archivo, d.tamano_bytes, d.version, d.vigente_actual, d.observaciones, d.fecha_carga, d.cargado_por
+		d.nombre_archivo, d.tamano_bytes, d.version, d.vigente_actual, d.observaciones, d.fecha_carga, d.cargado_por,
+		d.eliminado, d.eliminado_por, d.fecha_eliminacion
 	FROM documentos d
 	INNER JOIN tipos_documento td ON td.id = d.tipo_documento_id
 `
@@ -35,6 +36,7 @@ func scanDocumento(row interface {
 		&d.ID, &d.OrganizationID, &d.VehiculoID, &d.TipoDocumentoID, &d.TipoDocumentoNombre,
 		&d.FechaExpedicion, &d.FechaVencimiento, &d.EstadoDocumento, &d.ArchivoURL, &d.ArchivoDriveID,
 		&d.NombreArchivo, &d.TamanoBytes, &d.Version, &d.VigenteActual, &d.Observaciones, &d.FechaCarga, &d.CargadoPor,
+		&d.Eliminado, &d.EliminadoPor, &d.FechaEliminacion,
 	)
 	if err != nil {
 		return nil, err
@@ -42,10 +44,11 @@ func scanDocumento(row interface {
 	return &d, nil
 }
 
-// ListarPorVehiculo retorna únicamente la versión vigente de cada tipo de documento del vehículo.
+// ListarPorVehiculo retorna únicamente la versión vigente de cada tipo de documento del vehículo,
+// excluyendo los que fueron eliminados lógicamente.
 func (r *DocumentoRepository) ListarPorVehiculo(ctx context.Context, organizationID, vehiculoID int) ([]models.Documento, error) {
 	query := documentoSelectBase + `
-		WHERE d.organization_id = $1 AND d.vehiculo_id = $2 AND d.vigente_actual = TRUE
+		WHERE d.organization_id = $1 AND d.vehiculo_id = $2 AND d.vigente_actual = TRUE AND d.eliminado = FALSE
 		ORDER BY td.nombre
 	`
 	rows, err := r.db.QueryContext(ctx, query, organizationID, vehiculoID)
@@ -164,7 +167,7 @@ func (r *DocumentoRepository) GetByID(ctx context.Context, organizationID, id in
 // estado calculado deba generar una alerta según config_alertas.
 func (r *DocumentoRepository) ListarParaRevisionDiaria(ctx context.Context) ([]models.Documento, error) {
 	query := documentoSelectBase + `
-		WHERE d.vigente_actual = TRUE AND d.fecha_vencimiento IS NOT NULL
+		WHERE d.vigente_actual = TRUE AND d.fecha_vencimiento IS NOT NULL AND d.eliminado = FALSE
 	`
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
@@ -236,7 +239,7 @@ func scanDocumentoGlobal(row interface {
 // para la pantalla de Gestión Documental (a diferencia de ListarPorVehiculo,
 // que solo trae los de un vehículo puntual).
 func (r *DocumentoRepository) ListarGlobal(ctx context.Context, f DocumentoFiltroGlobal) ([]models.Documento, int64, error) {
-	conditions := []string{"d.organization_id = $1", "d.vigente_actual = TRUE"}
+	conditions := []string{"d.organization_id = $1", "d.vigente_actual = TRUE", "d.eliminado = FALSE"}
 	args := []interface{}{f.OrganizationID}
 	argPos := 2
 
@@ -312,7 +315,7 @@ func (r *DocumentoRepository) ConteoPorTipo(ctx context.Context, organizationID 
 	query := `
 		SELECT td.id, td.nombre, COUNT(d.id), COALESCE(SUM(d.tamano_bytes), 0)
 		FROM tipos_documento td
-		LEFT JOIN documentos d ON d.tipo_documento_id = td.id AND d.vigente_actual = TRUE AND d.organization_id = $1
+		LEFT JOIN documentos d ON d.tipo_documento_id = td.id AND d.vigente_actual = TRUE AND d.organization_id = $1 AND d.eliminado = FALSE
 		GROUP BY td.id, td.nombre
 		ORDER BY td.id
 	`
@@ -331,4 +334,27 @@ func (r *DocumentoRepository) ConteoPorTipo(ctx context.Context, organizationID 
 		resultados = append(resultados, c)
 	}
 	return resultados, nil
+}
+
+// EliminarLogico marca un documento como eliminado (borrado lógico), sin
+// removerlo de la base de datos ni del archivo en Google Drive. Se conserva
+// para trazabilidad/auditoría, tal como se requiere en el manejo documental
+// de una entidad pública.
+func (r *DocumentoRepository) EliminarLogico(ctx context.Context, organizationID, id, usuarioID int) error {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE documentos
+		SET eliminado = TRUE, eliminado_por = $1, fecha_eliminacion = NOW()
+		WHERE id = $2 AND organization_id = $3 AND eliminado = FALSE
+	`, usuarioID, id, organizationID)
+	if err != nil {
+		return fmt.Errorf("error al eliminar documento: %w", err)
+	}
+	filas, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("error al verificar eliminación: %w", err)
+	}
+	if filas == 0 {
+		return apperrors.ErrNotFound
+	}
+	return nil
 }

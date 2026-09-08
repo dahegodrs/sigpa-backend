@@ -32,14 +32,17 @@ type Documento struct {
 	Observaciones       *string         `json:"observaciones,omitempty" db:"observaciones"`
 	FechaCarga          time.Time       `json:"fecha_carga" db:"fecha_carga"`
 	CargadoPor          *int            `json:"cargado_por,omitempty" db:"cargado_por"`
+	Eliminado           bool            `json:"eliminado" db:"eliminado"`
+	EliminadoPor        *int            `json:"eliminado_por,omitempty" db:"eliminado_por"`
+	FechaEliminacion    *time.Time      `json:"fecha_eliminacion,omitempty" db:"fecha_eliminacion"`
 }
 
 // TipoDocumento catálogo de tipos de documento controlados.
 type TipoDocumento struct {
-	ID                 int    `json:"id" db:"id"`
-	Nombre             string `json:"nombre" db:"nombre"`
-	Obligatorio        bool   `json:"obligatorio" db:"obligatorio"`
-	DiasAlertaDefault  int    `json:"dias_alerta_default" db:"dias_alerta_default"`
+	ID                int    `json:"id" db:"id"`
+	Nombre            string `json:"nombre" db:"nombre"`
+	Obligatorio       bool   `json:"obligatorio" db:"obligatorio"`
+	DiasAlertaDefault int    `json:"dias_alerta_default" db:"dias_alerta_default"`
 }
 
 // DiasHasta calcula la diferencia en días de calendario entre "ahora" y una
