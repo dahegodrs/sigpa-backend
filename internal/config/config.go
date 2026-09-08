@@ -31,10 +31,11 @@ type Config struct {
 
 	// Service account con domain-wide delegation, usado tanto para Drive como
 	// para Gmail (impersonando la cuenta institucional correspondiente).
-	GoogleServiceAccountFile   string
-	GoogleDriveImpersonateEmail string
-	GoogleDriveRootFolderID    string
-	GmailImpersonateEmail      string
+	GoogleServiceAccountFile       string
+	GoogleServiceAccountJSONBase64 string
+	GoogleDriveImpersonateEmail    string
+	GoogleDriveRootFolderID        string
+	GmailImpersonateEmail          string
 
 	// SMTP: alternativa al envío vía Gmail API cuando no hay acceso a
 	// admin.google.com para activar domain-wide delegation. Usa una cuenta
@@ -73,10 +74,11 @@ func Load() *Config {
 		GoogleRedirectURL:  getEnv("GOOGLE_REDIRECT_URL", ""),
 		AllowedDomain:      getEnv("ALLOWED_DOMAIN", ""),
 
-		GoogleServiceAccountFile:    getEnv("GOOGLE_SERVICE_ACCOUNT_FILE", ""),
-		GoogleDriveImpersonateEmail: getEnv("GOOGLE_DRIVE_IMPERSONATE_EMAIL", ""),
-		GoogleDriveRootFolderID:     getEnv("GOOGLE_DRIVE_ROOT_FOLDER_ID", ""),
-		GmailImpersonateEmail:       getEnv("GMAIL_IMPERSONATE_EMAIL", ""),
+		GoogleServiceAccountFile:       getEnv("GOOGLE_SERVICE_ACCOUNT_FILE", ""),
+		GoogleServiceAccountJSONBase64: getEnv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64", ""),
+		GoogleDriveImpersonateEmail:    getEnv("GOOGLE_DRIVE_IMPERSONATE_EMAIL", ""),
+		GoogleDriveRootFolderID:        getEnv("GOOGLE_DRIVE_ROOT_FOLDER_ID", ""),
+		GmailImpersonateEmail:          getEnv("GMAIL_IMPERSONATE_EMAIL", ""),
 
 		SMTPHost:       getEnv("SMTP_HOST", "smtp.gmail.com"),
 		SMTPPort:       getEnv("SMTP_PORT", "587"),

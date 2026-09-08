@@ -74,14 +74,15 @@ func main() {
 	var driveUploader service.DriveUploader
 	var notificador service.NotificadorEmail
 
-	if cfg.GoogleServiceAccountFile != "" {
+	if cfg.GoogleServiceAccountFile != "" || cfg.GoogleServiceAccountJSONBase64 != "" {
 		driveSvc, err := service.NewGoogleDriveService(ctx, cfg.GoogleServiceAccountFile, cfg.GoogleDriveRootFolderID, cfg.AllowedDomain)
 		if err != nil {
 			log.Fatalf("error al inicializar integración con Google Drive: %v", err)
 		}
 		driveUploader = driveSvc
+		log.Println("Integración con Google Drive inicializada correctamente")
 	} else {
-		log.Println("GOOGLE_SERVICE_ACCOUNT_FILE no configurado: usando stub de Drive (solo para desarrollo)")
+		log.Println("GOOGLE_SERVICE_ACCOUNT_FILE / GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 no configurados: usando stub de Drive (solo para desarrollo)")
 		driveUploader = &driveUploaderStub{}
 	}
 
