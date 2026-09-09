@@ -47,6 +47,27 @@ func (r *ProgramacionRepository) Listar(ctx context.Context, organizationID int)
 	return lista, nil
 }
 
+// ObtenerUltima devuelve la programación más reciente (por fecha) de la
+// organización, incluyendo sus items — usada para "Copiar programación
+// anterior" en el frontend, evitando que el usuario deba re-crear cada fila
+// manualmente cuando la mayoría de vehículos repiten conductor/actividad.
+func (r *ProgramacionRepository) ObtenerUltima(ctx context.Context, organizationID int) (*models.Programacion, error) {
+	var id int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id FROM programaciones_vehiculos
+		WHERE organization_id = $1
+		ORDER BY fecha DESC, id DESC
+		LIMIT 1
+	`, organizationID).Scan(&id)
+	if err == sql.ErrNoRows {
+		return nil, apperrors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("error al buscar la última programación: %w", err)
+	}
+	return r.Obtener(ctx, organizationID, id)
+}
+
 // Obtener devuelve la cabecera + items de una programación.
 func (r *ProgramacionRepository) Obtener(ctx context.Context, organizationID, id int) (*models.Programacion, error) {
 	var p models.Programacion

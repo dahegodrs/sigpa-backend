@@ -143,6 +143,7 @@ func Setup(cfg *config.Config, corsOrigins []string, h Handlers) *gin.Engine {
 			{
 				programaciones.GET("", h.Programacion.Listar)
 				programaciones.POST("", middleware.RequireRoles("Administrador", "Dependencia"), h.Programacion.Crear)
+				programaciones.GET("/ultima", h.Programacion.ObtenerUltima)
 				programaciones.GET("/:id", h.Programacion.Obtener)
 				programaciones.PUT("/:id", middleware.RequireRoles("Administrador", "Dependencia"), h.Programacion.Actualizar)
 				programaciones.DELETE("/:id", middleware.RequireRoles("Administrador"), h.Programacion.Eliminar)

@@ -23,6 +23,11 @@ func (s *ProgramacionService) Obtener(ctx context.Context, organizationID, id in
 	return s.repo.Obtener(ctx, organizationID, id)
 }
 
+// ObtenerUltima expone la programación más reciente para "Copiar programación anterior".
+func (s *ProgramacionService) ObtenerUltima(ctx context.Context, organizationID int) (*models.Programacion, error) {
+	return s.repo.ObtenerUltima(ctx, organizationID)
+}
+
 func (s *ProgramacionService) Crear(ctx context.Context, p *models.Programacion) (int, error) {
 	return s.repo.Crear(ctx, p)
 }

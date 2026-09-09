@@ -142,6 +142,23 @@ func (h *ProgramacionHandler) Listar(c *gin.Context) {
 	response.Success(c, http.StatusOK, lista)
 }
 
+// GET /api/v1/programaciones/ultima
+// Devuelve la programación más reciente (con items) para que el frontend
+// pueda ofrecer "Copiar programación anterior" al crear una nueva.
+func (h *ProgramacionHandler) ObtenerUltima(c *gin.Context) {
+	orgID := middleware.OrganizationID(c)
+	prog, err := h.svc.ObtenerUltima(c.Request.Context(), orgID)
+	if errors.Is(err, apperrors.ErrNotFound) {
+		response.Error(c, http.StatusNotFound, "no hay programaciones previas para copiar")
+		return
+	}
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.Success(c, http.StatusOK, prog)
+}
+
 // GET /api/v1/programaciones/:id
 func (h *ProgramacionHandler) Obtener(c *gin.Context) {
 	orgID := middleware.OrganizationID(c)
