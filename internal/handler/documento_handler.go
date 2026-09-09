@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"html"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -221,42 +223,60 @@ func (h *DocumentoHandler) NotificarDocumento(c *gin.Context) {
 		TipoDocumento     string `json:"tipo_documento"`
 		FechaVencimiento  string `json:"fecha_vencimiento"`
 		DestinatarioExtra string `json:"destinatario_extra"` // correo adicional (opcional)
+		Asunto            string `json:"asunto"`             // asunto editado por el usuario en el diálogo
+		Cuerpo            string `json:"cuerpo"`             // cuerpo (texto plano) editado por el usuario
 	}
 	_ = c.ShouldBindJSON(&body)
 
-	// Construir asunto y cuerpo del correo
-	asunto := "🔔 Renovación requerida: " + body.TipoDocumento + " — Vehículo " + vehiculo.Placa
-	if body.TipoDocumento == "" {
-		asunto = "🔔 Renovación de documento requerida — Vehículo " + vehiculo.Placa
-	}
+	var asunto, cuerpoHTML string
 
-	vencimiento := body.FechaVencimiento
-	if vencimiento == "" {
-		vencimiento = "Sin fecha registrada"
-	}
-	dependencia := vehiculo.DependenciaNombre
-	if dependencia == "" {
-		dependencia = "Sin asignar"
-	}
-	responsable := vehiculo.ResponsableNombre
-	if responsable == "" {
-		responsable = "Sin asignar"
-	}
+	if body.Asunto != "" || body.Cuerpo != "" {
+		// El usuario editó el asunto/cuerpo en el diálogo de notificación —
+		// se respeta tal cual lo escribió, en vez de regenerar la plantilla
+		// fija. El cuerpo llega como texto plano (con saltos de línea reales),
+		// así que se envuelve en HTML básico convirtiendo \n en <br> para que
+		// se vea igual que en el textarea del formulario.
+		asunto = body.Asunto
+		cuerpoEscapado := html.EscapeString(body.Cuerpo)
+		cuerpoConSaltos := strings.ReplaceAll(cuerpoEscapado, "\n", "<br>")
+		cuerpoHTML = "<div style='font-family:Arial,sans-serif;max-width:600px;margin:0 auto;white-space:pre-wrap;line-height:1.6;color:#333'>" +
+			cuerpoConSaltos + "</div>"
+	} else {
+		// Fallback: nadie envió asunto/cuerpo (ej. llamada directa a la API) —
+		// se genera la plantilla institucional por defecto.
+		asunto = "🔔 Renovación requerida: " + body.TipoDocumento + " — Vehículo " + vehiculo.Placa
+		if body.TipoDocumento == "" {
+			asunto = "🔔 Renovación de documento requerida — Vehículo " + vehiculo.Placa
+		}
 
-	cuerpoHTML := "<div style='font-family:Arial,sans-serif;max-width:600px;margin:0 auto'>" +
-		"<div style='background:#DA151C;padding:20px 24px;border-radius:8px 8px 0 0'>" +
-		"<h2 style='color:#fff;margin:0;font-size:18px'>⚠️ Renovación de documento requerida</h2>" +
-		"</div>" +
-		"<div style='background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-radius:0 0 8px 8px'>" +
-		"<table style='width:100%;border-collapse:collapse'>" +
-		"<tr><td style='padding:8px 0;color:#666;width:40%'><strong>Vehículo:</strong></td><td style='padding:8px 0;font-weight:700;color:#333'>" + vehiculo.Placa + "</td></tr>" +
-		"<tr><td style='padding:8px 0;color:#666'><strong>Documento:</strong></td><td style='padding:8px 0;color:#333'>" + body.TipoDocumento + "</td></tr>" +
-		"<tr><td style='padding:8px 0;color:#666'><strong>Vencimiento:</strong></td><td style='padding:8px 0;color:#DA151C;font-weight:700'>" + vencimiento + "</td></tr>" +
-		"<tr><td style='padding:8px 0;color:#666'><strong>Dependencia:</strong></td><td style='padding:8px 0;color:#333'>" + dependencia + "</td></tr>" +
-		"<tr><td style='padding:8px 0;color:#666'><strong>Responsable:</strong></td><td style='padding:8px 0;color:#333'>" + responsable + "</td></tr>" +
-		"</table>" +
-		"<p style='margin-top:20px;font-size:13px;color:#888'>Este correo fue generado automáticamente por SIGPA — Sistema Integral de Gestión del Parque Automotor · Alcaldía de Funza.</p>" +
-		"</div></div>"
+		vencimiento := body.FechaVencimiento
+		if vencimiento == "" {
+			vencimiento = "Sin fecha registrada"
+		}
+		dependencia := vehiculo.DependenciaNombre
+		if dependencia == "" {
+			dependencia = "Sin asignar"
+		}
+		responsable := vehiculo.ResponsableNombre
+		if responsable == "" {
+			responsable = "Sin asignar"
+		}
+
+		cuerpoHTML = "<div style='font-family:Arial,sans-serif;max-width:600px;margin:0 auto'>" +
+			"<div style='background:#DA151C;padding:20px 24px;border-radius:8px 8px 0 0'>" +
+			"<h2 style='color:#fff;margin:0;font-size:18px'>⚠️ Renovación de documento requerida</h2>" +
+			"</div>" +
+			"<div style='background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-radius:0 0 8px 8px'>" +
+			"<table style='width:100%;border-collapse:collapse'>" +
+			"<tr><td style='padding:8px 0;color:#666;width:40%'><strong>Vehículo:</strong></td><td style='padding:8px 0;font-weight:700;color:#333'>" + vehiculo.Placa + "</td></tr>" +
+			"<tr><td style='padding:8px 0;color:#666'><strong>Documento:</strong></td><td style='padding:8px 0;color:#333'>" + body.TipoDocumento + "</td></tr>" +
+			"<tr><td style='padding:8px 0;color:#666'><strong>Vencimiento:</strong></td><td style='padding:8px 0;color:#DA151C;font-weight:700'>" + vencimiento + "</td></tr>" +
+			"<tr><td style='padding:8px 0;color:#666'><strong>Dependencia:</strong></td><td style='padding:8px 0;color:#333'>" + dependencia + "</td></tr>" +
+			"<tr><td style='padding:8px 0;color:#666'><strong>Responsable:</strong></td><td style='padding:8px 0;color:#333'>" + responsable + "</td></tr>" +
+			"</table>" +
+			"<p style='margin-top:20px;font-size:13px;color:#888'>Este correo fue generado automáticamente por SIGPA — Sistema Integral de Gestión del Parque Automotor · Alcaldía de Funza.</p>" +
+			"</div></div>"
+	}
 
 	ctx := c.Request.Context()
 
