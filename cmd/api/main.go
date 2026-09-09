@@ -86,11 +86,18 @@ func main() {
 		driveUploader = &driveUploaderStub{}
 	}
 
-	if cfg.SMTPUsuario != "" && cfg.SMTPContrasena != "" {
+	// Se prefiere Brevo (API HTTP) sobre SMTP: plataformas cloud gratuitas
+	// como Render suelen bloquear el puerto 587, mientras que HTTPS nunca
+	// está bloqueado. Si no hay BREVO_API_KEY configurada, se cae a SMTP
+	// (útil para desarrollo local, donde el puerto 587 sí funciona).
+	if cfg.BrevoAPIKey != "" {
+		notificador = service.NewBrevoEmailService(cfg.BrevoAPIKey, cfg.BrevoRemitenteEmail, cfg.BrevoRemitenteNombre)
+		log.Printf("Envío de correo configurado vía Brevo API como %s", cfg.BrevoRemitenteEmail)
+	} else if cfg.SMTPUsuario != "" && cfg.SMTPContrasena != "" {
 		notificador = service.NewSMTPEmailService(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsuario, cfg.SMTPContrasena)
 		log.Printf("Envío de correo configurado vía SMTP (%s) como %s", cfg.SMTPHost, cfg.SMTPUsuario)
 	} else {
-		log.Println("SMTP no configurado: usando stub de correo (solo consola, para desarrollo)")
+		log.Println("Brevo/SMTP no configurados: usando stub de correo (solo consola, para desarrollo)")
 		notificador = &notificadorGmailStub{}
 	}
 

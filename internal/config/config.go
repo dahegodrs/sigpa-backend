@@ -45,6 +45,13 @@ type Config struct {
 	SMTPUsuario    string
 	SMTPContrasena string
 
+	// Brevo (antes Sendinblue): API HTTP para envío de correos transaccionales.
+	// Se prefiere sobre SMTP en despliegues cloud (Render, etc.) porque el
+	// puerto 587 suele estar bloqueado, mientras que HTTPS nunca lo está.
+	BrevoAPIKey          string
+	BrevoRemitenteEmail  string
+	BrevoRemitenteNombre string
+
 	JWTSecret string
 
 	GmailSenderEmail string
@@ -84,6 +91,10 @@ func Load() *Config {
 		SMTPPort:       getEnv("SMTP_PORT", "587"),
 		SMTPUsuario:    getEnv("SMTP_USER", ""),
 		SMTPContrasena: getEnv("SMTP_APP_PASSWORD", ""),
+
+		BrevoAPIKey:          getEnv("BREVO_API_KEY", ""),
+		BrevoRemitenteEmail:  getEnv("BREVO_REMITENTE_EMAIL", "Patio@funza-cundinamarca.gov.co"),
+		BrevoRemitenteNombre: getEnv("BREVO_REMITENTE_NOMBRE", "SIGPA - Patio Alcaldía de Funza"),
 
 		JWTSecret: getEnv("JWT_SECRET", ""),
 
