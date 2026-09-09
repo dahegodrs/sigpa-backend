@@ -203,7 +203,7 @@ func (h *DocumentoHandler) ListarGlobal(c *gin.Context) {
 
 // POST /api/v1/vehiculos/:id/documentos/:docId/notificar
 // Envía un correo de notificación de renovación de documento usando la cuenta
-// corporativa configurada en SMTP_USER (Patio@funza-cundinamarca.gov.co).
+// corporativa configurada (Brevo o SMTP según config).
 func (h *DocumentoHandler) NotificarDocumento(c *gin.Context) {
 	orgID := middleware.OrganizationID(c)
 	vehiculoID, err := strconv.Atoi(c.Param("id"))
@@ -218,37 +218,24 @@ func (h *DocumentoHandler) NotificarDocumento(c *gin.Context) {
 		return
 	}
 
-	// Datos del documento desde el body (opcionales — pueden venir del frontend)
 	var body struct {
 		TipoDocumento     string `json:"tipo_documento"`
 		FechaVencimiento  string `json:"fecha_vencimiento"`
-		DestinatarioExtra string `json:"destinatario_extra"` // correo adicional (opcional)
-		Asunto            string `json:"asunto"`             // asunto editado por el usuario en el diálogo
-		Cuerpo            string `json:"cuerpo"`             // cuerpo (texto plano) editado por el usuario
+		DestinatarioExtra string `json:"destinatario_extra"`
+		Asunto            string `json:"asunto"`
+		Cuerpo            string `json:"cuerpo"`
 	}
 	_ = c.ShouldBindJSON(&body)
 
 	var asunto, cuerpoHTML string
 
 	if body.Asunto != "" || body.Cuerpo != "" {
-		// El usuario editó el asunto/cuerpo en el diálogo de notificación —
-		// se respeta tal cual lo escribió, en vez de regenerar la plantilla
-		// fija. El cuerpo llega como texto plano (con saltos de línea reales),
-		// así que se envuelve en HTML básico convirtiendo \n en <br> para que
-		// se vea igual que en el textarea del formulario.
 		asunto = body.Asunto
 		cuerpoEscapado := html.EscapeString(body.Cuerpo)
 		cuerpoConSaltos := strings.ReplaceAll(cuerpoEscapado, "\n", "<br>")
-		cuerpoHTML = "<div style='font-family:Arial,sans-serif;max-width:600px;margin:0 auto;white-space:pre-wrap;line-height:1.6;color:#333'>" +
-			cuerpoConSaltos + "</div>"
+		contenidoInterno := "<div style=\"white-space:pre-wrap\">" + cuerpoConSaltos + "</div>"
+		cuerpoHTML = envolverPlantillaInstitucional("Renovación de documento requerida", contenidoInterno)
 	} else {
-		// Fallback: nadie envió asunto/cuerpo (ej. llamada directa a la API) —
-		// se genera la plantilla institucional por defecto.
-		asunto = "🔔 Renovación requerida: " + body.TipoDocumento + " — Vehículo " + vehiculo.Placa
-		if body.TipoDocumento == "" {
-			asunto = "🔔 Renovación de documento requerida — Vehículo " + vehiculo.Placa
-		}
-
 		vencimiento := body.FechaVencimiento
 		if vencimiento == "" {
 			vencimiento = "Sin fecha registrada"
@@ -261,28 +248,16 @@ func (h *DocumentoHandler) NotificarDocumento(c *gin.Context) {
 		if responsable == "" {
 			responsable = "Sin asignar"
 		}
-
-		cuerpoHTML = "<div style='font-family:Arial,sans-serif;max-width:600px;margin:0 auto'>" +
-			"<div style='background:#DA151C;padding:20px 24px;border-radius:8px 8px 0 0'>" +
-			"<h2 style='color:#fff;margin:0;font-size:18px'>⚠️ Renovación de documento requerida</h2>" +
-			"</div>" +
-			"<div style='background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-radius:0 0 8px 8px'>" +
-			"<table style='width:100%;border-collapse:collapse'>" +
-			"<tr><td style='padding:8px 0;color:#666;width:40%'><strong>Vehículo:</strong></td><td style='padding:8px 0;font-weight:700;color:#333'>" + vehiculo.Placa + "</td></tr>" +
-			"<tr><td style='padding:8px 0;color:#666'><strong>Documento:</strong></td><td style='padding:8px 0;color:#333'>" + body.TipoDocumento + "</td></tr>" +
-			"<tr><td style='padding:8px 0;color:#666'><strong>Vencimiento:</strong></td><td style='padding:8px 0;color:#DA151C;font-weight:700'>" + vencimiento + "</td></tr>" +
-			"<tr><td style='padding:8px 0;color:#666'><strong>Dependencia:</strong></td><td style='padding:8px 0;color:#333'>" + dependencia + "</td></tr>" +
-			"<tr><td style='padding:8px 0;color:#666'><strong>Responsable:</strong></td><td style='padding:8px 0;color:#333'>" + responsable + "</td></tr>" +
-			"</table>" +
-			"<p style='margin-top:20px;font-size:13px;color:#888'>Este correo fue generado automáticamente por SIGPA — Sistema Integral de Gestión del Parque Automotor · Alcaldía de Funza.</p>" +
-			"</div></div>"
+		asunto = "Solicitud de renovación: " + body.TipoDocumento + " — Vehículo " + vehiculo.Placa
+		if body.TipoDocumento == "" {
+			asunto = "Solicitud de renovación de documento — Vehículo " + vehiculo.Placa
+		}
+		contenidoInterno := construirTablaDatos(vehiculo.Placa, body.TipoDocumento, vencimiento, dependencia, responsable)
+		cuerpoHTML = envolverPlantillaInstitucional("Renovación de documento requerida", contenidoInterno)
 	}
 
 	ctx := c.Request.Context()
 
-	// Determinar destinatario principal
-	// Si el frontend envió un destinatario explícito, usar ese;
-	// si no, enviar a la propia cuenta del patio como registro interno.
 	destinatarioPrincipal := body.DestinatarioExtra
 	if destinatarioPrincipal == "" {
 		destinatarioPrincipal = h.smtpSender
@@ -336,4 +311,60 @@ func (h *DocumentoHandler) Eliminar(c *gin.Context) {
 	}
 
 	response.Success(c, http.StatusOK, gin.H{"eliminado": true})
+}
+
+// ── Plantilla visual institucional del correo ──────────────────────────────
+//
+// iconoAlertaSVG: triángulo de alerta vectorial en vez de emojis (⚠️🔔), que
+// se renderizan de forma inconsistente entre clientes de correo y suelen
+// percibirse como "genéricos". El SVG mantiene siempre el mismo trazo limpio
+// y los colores institucionales de Funza.
+const iconoAlertaSVG = "<svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" xmlns=\"http://www.w3.org/2000/svg\">" +
+	"<path d=\"M12 3.5L2.5 20h19L12 3.5Z\" fill=\"#ffffff\"/>" +
+	"<rect x=\"11.1\" y=\"9.3\" width=\"1.8\" height=\"5.6\" rx=\"0.9\" fill=\"#DA151C\"/>" +
+	"<circle cx=\"12\" cy=\"17\" r=\"1.1\" fill=\"#DA151C\"/>" +
+	"</svg>"
+
+// envolverPlantillaInstitucional aplica el diseño visual compartido de SIGPA
+// (header rojo con ícono + card blanca con sombra sutil) alrededor de un
+// contenido HTML ya preparado, para que todos los correos —editados
+// manualmente por el usuario o generados automáticamente— luzcan
+// consistentes con la identidad de la Alcaldía de Funza.
+func envolverPlantillaInstitucional(tituloHeader, contenidoHTML string) string {
+	return "<div style=\"font-family:'Segoe UI',Arial,sans-serif;max-width:600px;margin:0 auto;background:#f4f4f5;padding:24px 0\">" +
+		"<div style=\"max-width:560px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,0.06)\">" +
+		"<div style=\"background:#DA151C;padding:18px 24px;display:flex;align-items:center;gap:10px\">" +
+		"<table role=\"presentation\" style=\"border-collapse:collapse\"><tr>" +
+		"<td style=\"vertical-align:middle;padding-right:10px\">" + iconoAlertaSVG + "</td>" +
+		"<td style=\"vertical-align:middle\"><span style=\"color:#ffffff;font-size:16px;font-weight:700;letter-spacing:0.01em\">" + tituloHeader + "</span></td>" +
+		"</tr></table>" +
+		"</div>" +
+		"<div style=\"padding:26px 28px;color:#333333;font-size:14px;line-height:1.65\">" +
+		contenidoHTML +
+		"</div>" +
+		"<div style=\"padding:14px 28px;background:#fafafa;border-top:1px solid #eeeeee\">" +
+		"<span style=\"font-size:11.5px;color:#9a9a9a\">Este correo fue generado por SIGPA — Sistema Integral de Gestión del Parque Automotor · Alcaldía de Funza</span>" +
+		"</div>" +
+		"</div></div>"
+}
+
+// construirTablaDatos genera la tabla de datos del documento (usada solo en
+// el fallback, cuando nadie envió un mensaje personalizado desde el diálogo).
+func construirTablaDatos(placa, tipoDocumento, vencimiento, dependencia, responsable string) string {
+	fila := func(etiqueta, valor string, colorValor string) string {
+		if colorValor == "" {
+			colorValor = "#333333"
+		}
+		return "<tr>" +
+			"<td style=\"padding:9px 0;color:#767676;width:38%;font-size:13.5px\">" + etiqueta + "</td>" +
+			"<td style=\"padding:9px 0;color:" + colorValor + ";font-weight:600;font-size:13.5px\">" + valor + "</td>" +
+			"</tr>"
+	}
+	return "<table role=\"presentation\" style=\"width:100%;border-collapse:collapse;border-top:1px solid #f0f0f0\">" +
+		fila("Vehículo", placa, "#1a1a1a") +
+		fila("Documento", tipoDocumento, "") +
+		fila("Vencimiento", vencimiento, "#DA151C") +
+		fila("Dependencia", dependencia, "") +
+		fila("Responsable", responsable, "") +
+		"</table>"
 }
