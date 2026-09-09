@@ -17,6 +17,15 @@ type Alerta struct {
 	DetalleError    *string    `json:"detalle_error,omitempty" db:"detalle_error"`
 	Leida           bool       `json:"leida" db:"leida"`
 	FechaCreacion   time.Time  `json:"fecha_creacion" db:"fecha_creacion"`
+
+	// Campos enriquecidos vía JOIN (no se persisten en la tabla `alertas`,
+	// solo se completan al listar) — permiten mostrar mensajes claros como
+	// "SOAT vencido hace 5 días" en vez del genérico "Documento vencido",
+	// sin que el frontend tenga que hacer una consulta adicional por cada
+	// alerta para averiguar a qué documento/vehículo corresponde.
+	VehiculoPlaca       string     `json:"vehiculo_placa,omitempty" db:"vehiculo_placa"`
+	TipoDocumentoNombre string     `json:"tipo_documento_nombre,omitempty" db:"tipo_documento_nombre"`
+	DocumentoFechaVenc  *time.Time `json:"documento_fecha_vencimiento,omitempty" db:"documento_fecha_vencimiento"`
 }
 
 // ConfigAlerta define los umbrales (días antes del vencimiento) por organización.

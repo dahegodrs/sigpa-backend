@@ -102,9 +102,24 @@ func (r *AlertaRepository) EliminarConfig(ctx context.Context, organizationID, i
 // --- Alertas generadas/enviadas ---
 
 const alertaSelectBase = `
-	SELECT id, organization_id, vehiculo_id, documento_id, tipo_alerta, canal,
-		fecha_programada, fecha_envio, destinatario, estado_envio, detalle_error, leida, fecha_creacion
-	FROM alertas
+	SELECT a.id, a.organization_id, a.vehiculo_id, a.documento_id, a.tipo_alerta, a.canal,
+		a.fecha_programada, a.fecha_envio, a.destinatario, a.estado_envio, a.detalle_error, a.leida, a.fecha_creacion
+	FROM alertas a
+`
+
+// alertaSelectEnriquecido agrega los datos de vehículo y documento vía JOIN,
+// para que el frontend pueda mostrar mensajes claros ("SOAT vencido hace 5
+// días") sin tener que hacer una consulta adicional por cada alerta.
+const alertaSelectEnriquecido = `
+	SELECT a.id, a.organization_id, a.vehiculo_id, a.documento_id, a.tipo_alerta, a.canal,
+		a.fecha_programada, a.fecha_envio, a.destinatario, a.estado_envio, a.detalle_error, a.leida, a.fecha_creacion,
+		COALESCE(v.placa, '') AS vehiculo_placa,
+		COALESCE(td.nombre, '') AS tipo_documento_nombre,
+		d.fecha_vencimiento AS documento_fecha_vencimiento
+	FROM alertas a
+	LEFT JOIN vehiculos v ON v.id = a.vehiculo_id
+	LEFT JOIN documentos d ON d.id = a.documento_id
+	LEFT JOIN tipos_documento td ON td.id = d.tipo_documento_id
 `
 
 func scanAlerta(row interface {
@@ -114,6 +129,21 @@ func scanAlerta(row interface {
 	err := row.Scan(
 		&a.ID, &a.OrganizationID, &a.VehiculoID, &a.DocumentoID, &a.TipoAlerta, &a.Canal,
 		&a.FechaProgramada, &a.FechaEnvio, &a.Destinatario, &a.EstadoEnvio, &a.DetalleError, &a.Leida, &a.FechaCreacion,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+func scanAlertaEnriquecida(row interface {
+	Scan(dest ...interface{}) error
+}) (*models.Alerta, error) {
+	var a models.Alerta
+	err := row.Scan(
+		&a.ID, &a.OrganizationID, &a.VehiculoID, &a.DocumentoID, &a.TipoAlerta, &a.Canal,
+		&a.FechaProgramada, &a.FechaEnvio, &a.Destinatario, &a.EstadoEnvio, &a.DetalleError, &a.Leida, &a.FechaCreacion,
+		&a.VehiculoPlaca, &a.TipoDocumentoNombre, &a.DocumentoFechaVenc,
 	)
 	if err != nil {
 		return nil, err
@@ -191,13 +221,16 @@ func (r *AlertaRepository) MarcarResultado(ctx context.Context, id int, exito bo
 	return nil
 }
 
-// ListarPorOrganizacion retorna alertas recientes para el panel de alertas del frontend.
+// ListarPorOrganizacion retorna alertas recientes para el panel de alertas del
+// frontend, enriquecidas con placa del vehículo, tipo de documento y fecha
+// de vencimiento real, para poder mostrar mensajes específicos en vez de un
+// genérico "Documento vencido".
 func (r *AlertaRepository) ListarPorOrganizacion(ctx context.Context, organizationID int, soloPendientes bool) ([]models.Alerta, error) {
-	query := alertaSelectBase + " WHERE organization_id = $1"
+	query := alertaSelectEnriquecido + " WHERE a.organization_id = $1"
 	if soloPendientes {
-		query += " AND estado_envio = 'Pendiente'"
+		query += " AND a.estado_envio = 'Pendiente'"
 	}
-	query += " ORDER BY fecha_programada DESC"
+	query += " ORDER BY a.fecha_programada DESC"
 
 	rows, err := r.db.QueryContext(ctx, query, organizationID)
 	if err != nil {
@@ -207,7 +240,7 @@ func (r *AlertaRepository) ListarPorOrganizacion(ctx context.Context, organizati
 
 	var alertas []models.Alerta
 	for rows.Next() {
-		a, err := scanAlerta(rows)
+		a, err := scanAlertaEnriquecida(rows)
 		if err != nil {
 			return nil, err
 		}
