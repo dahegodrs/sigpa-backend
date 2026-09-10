@@ -110,6 +110,12 @@ const alertaSelectBase = `
 // alertaSelectEnriquecido agrega los datos de vehículo y documento vía JOIN,
 // para que el frontend pueda mostrar mensajes claros ("SOAT vencido hace 5
 // días") sin tener que hacer una consulta adicional por cada alerta.
+//
+// Se usa INNER JOIN (en vez de LEFT JOIN) contra documentos, filtrando
+// además "d.eliminado = FALSE": así, cuando un documento se elimina
+// lógicamente, sus alertas dejan de aparecer automáticamente en el Centro
+// de Alertas y en el popup del Dashboard — sin borrar nada de la tabla
+// `alertas` (se conservan íntegras para auditoría, igual que el documento).
 const alertaSelectEnriquecido = `
 	SELECT a.id, a.organization_id, a.vehiculo_id, a.documento_id, a.tipo_alerta, a.canal,
 		a.fecha_programada, a.fecha_envio, a.destinatario, a.estado_envio, a.detalle_error, a.leida, a.fecha_creacion,
@@ -118,7 +124,7 @@ const alertaSelectEnriquecido = `
 		d.fecha_vencimiento AS documento_fecha_vencimiento
 	FROM alertas a
 	LEFT JOIN vehiculos v ON v.id = a.vehiculo_id
-	LEFT JOIN documentos d ON d.id = a.documento_id
+	INNER JOIN documentos d ON d.id = a.documento_id AND d.eliminado = FALSE
 	LEFT JOIN tipos_documento td ON td.id = d.tipo_documento_id
 `
 
