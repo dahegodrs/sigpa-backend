@@ -24,6 +24,13 @@ type Programacion struct {
 	CreadoPorNombre    string    `json:"creado_por_nombre,omitempty" db:"creado_por_nombre"`
 	FechaCreacion      time.Time `json:"fecha_creacion" db:"fecha_creacion"`
 	FechaActualizacion time.Time `json:"fecha_actualizacion" db:"fecha_actualizacion"`
+	// TotalItems/TotalProgramados se calculan en el listado (GET /programaciones)
+	// para mostrar el conteo en la tabla sin tener que traer todos los items.
+	// TotalProgramados es el que se muestra al usuario, ya que representa
+	// cuántos vehículos quedaron confirmados para la planilla oficial —
+	// las filas sin marcar (borradores) no cuentan aunque existan en la BD.
+	TotalItems       int `json:"total_items" db:"total_items"`
+	TotalProgramados int `json:"total_programados" db:"total_programados"`
 	// Items se rellena solo en el GET de detalle, no en el listado.
 	Items []ProgramacionItem `json:"items,omitempty"`
 }

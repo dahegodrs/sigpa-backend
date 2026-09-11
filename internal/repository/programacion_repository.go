@@ -24,9 +24,18 @@ func (r *ProgramacionRepository) Listar(ctx context.Context, organizationID int)
 		SELECT p.id, p.organization_id, TO_CHAR(p.fecha, 'YYYY-MM-DD') AS fecha,
 		       p.observaciones, p.creado_por,
 		       COALESCE(u.nombre, '') AS creado_por_nombre,
-		       p.fecha_creacion, p.fecha_actualizacion
+		       p.fecha_creacion, p.fecha_actualizacion,
+		       COALESCE(pi.total_items, 0) AS total_items,
+		       COALESCE(pi.total_programados, 0) AS total_programados
 		FROM programaciones_vehiculos p
 		LEFT JOIN usuarios u ON u.id = p.creado_por
+		LEFT JOIN (
+		  SELECT programacion_id,
+		         COUNT(*) AS total_items,
+		         COUNT(*) FILTER (WHERE programado = TRUE) AS total_programados
+		  FROM programacion_items
+		  GROUP BY programacion_id
+		) pi ON pi.programacion_id = p.id
 		WHERE p.organization_id = $1
 		ORDER BY p.fecha DESC
 	`, organizationID)
@@ -39,7 +48,8 @@ func (r *ProgramacionRepository) Listar(ctx context.Context, organizationID int)
 	for rows.Next() {
 		var p models.Programacion
 		if err := rows.Scan(&p.ID, &p.OrganizationID, &p.Fecha, &p.Observaciones,
-			&p.CreadoPor, &p.CreadoPorNombre, &p.FechaCreacion, &p.FechaActualizacion); err != nil {
+			&p.CreadoPor, &p.CreadoPorNombre, &p.FechaCreacion, &p.FechaActualizacion,
+			&p.TotalItems, &p.TotalProgramados); err != nil {
 			return nil, err
 		}
 		lista = append(lista, p)
