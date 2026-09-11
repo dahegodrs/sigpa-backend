@@ -131,7 +131,7 @@ func main() {
 		Organizacion: handler.NewOrganizacionHandler(organizacionRepo),
 		Historial:    handler.NewHistorialHandler(historialRepo),
 		Lista:        handler.NewListaHandler(listaSvc),
-		Programacion: handler.NewProgramacionHandler(programacionSvc),
+		Programacion: handler.NewProgramacionHandler(programacionSvc, usuarioRepo),
 	}
 
 	// --- Job diario de vencimientos y alertas ---

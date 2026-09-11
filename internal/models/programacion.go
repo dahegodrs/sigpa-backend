@@ -54,4 +54,20 @@ type ProgramacionItem struct {
 	// que salgan en el documento oficial que se genera al guardar.
 	Programado bool `json:"programado" db:"programado"`
 	Orden      int  `json:"orden" db:"orden"`
+
+	// ── Campos de solicitud (formulario de solicitud de vehículo) ──────────
+	// Motivo es texto libre explicando el porqué del viaje — distinto de
+	// Actividad, que es una categoría cerrada (TRASLADO FUNCIONARIOS, etc.).
+	Motivo *string `json:"motivo,omitempty" db:"motivo"`
+	// Origen distingue si la fila vino de una solicitud por formulario
+	// ("solicitud") o fue creada directamente por el director ("manual").
+	Origen            string  `json:"origen" db:"origen"`
+	SolicitanteNombre *string `json:"solicitante_nombre,omitempty" db:"solicitante_nombre"`
+	SolicitanteEmail  *string `json:"solicitante_email,omitempty" db:"solicitante_email"`
+	HoraSolicitada    *string `json:"hora_solicitada,omitempty" db:"hora_solicitada"` // "HH:MM" — tipo TIME en BD
+	PuntoEncuentro    *string `json:"punto_encuentro,omitempty" db:"punto_encuentro"`
+	// FechaProgramacion solo se rellena en ListarSolicitudesPorEmail (join
+	// con la cabecera), para que "Mis solicitudes" pueda mostrar en qué
+	// fecha quedó registrado el servicio sin tener que hacer otra consulta.
+	FechaProgramacion string `json:"fecha_programacion,omitempty" db:"-"`
 }

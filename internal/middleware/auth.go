@@ -98,3 +98,11 @@ func UserID(c *gin.Context) int {
 	userID, _ := val.(int)
 	return userID
 }
+
+// Email es un helper para que los handlers extraigan el correo del usuario
+// autenticado (útil para trazabilidad, ej. "quién solicitó este vehículo").
+func Email(c *gin.Context) string {
+	val, _ := c.Get(CtxEmail)
+	email, _ := val.(string)
+	return email
+}

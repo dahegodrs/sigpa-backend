@@ -156,6 +156,15 @@ func Setup(cfg *config.Config, corsOrigins []string, h Handlers) *gin.Engine {
 				programaciones.PUT("/:id", middleware.RequireRoles("Administrador", "Dependencia"), h.Programacion.Actualizar)
 				programaciones.DELETE("/:id", middleware.RequireRoles("Administrador"), h.Programacion.Eliminar)
 			}
+
+			// Solicitud de vehículo (formulario que reemplaza el correo
+			// electrónico actual): abierto a cualquier usuario autenticado,
+			// ya que el rol "Solicitante" no tiene acceso a otras secciones.
+			solicitudes := protected.Group("/solicitudes-vehiculo")
+			{
+				solicitudes.POST("", h.Programacion.SolicitarVehiculo)
+				solicitudes.GET("/mias", h.Programacion.MisSolicitudes)
+			}
 		}
 	}
 

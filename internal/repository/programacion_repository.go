@@ -166,6 +166,118 @@ func (r *ProgramacionRepository) Actualizar(ctx context.Context, organizationID,
 	return tx.Commit()
 }
 
+// BuscarPorFecha devuelve la cabecera de la programación (sin items) que
+// existe para una fecha específica dentro de la organización, o
+// apperrors.ErrNotFound si todavía no hay ninguna. Se usa en el flujo de
+// solicitud de vehículo: antes de crear una nueva programación para el
+// día, se verifica si ya existe una para no duplicarla.
+func (r *ProgramacionRepository) BuscarPorFecha(ctx context.Context, organizationID int, fecha string) (*models.Programacion, error) {
+	var p models.Programacion
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, organization_id, TO_CHAR(fecha, 'YYYY-MM-DD'), observaciones,
+		       creado_por, fecha_creacion, fecha_actualizacion
+		FROM programaciones_vehiculos
+		WHERE organization_id = $1 AND fecha = $2
+	`, organizationID, fecha).Scan(
+		&p.ID, &p.OrganizationID, &p.Fecha, &p.Observaciones,
+		&p.CreadoPor, &p.FechaCreacion, &p.FechaActualizacion,
+	)
+	if err == sql.ErrNoRows {
+		return nil, apperrors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("error al buscar programación por fecha: %w", err)
+	}
+	return &p, nil
+}
+
+// AgregarItem inserta UNA fila nueva a una programación ya existente,
+// calculando automáticamente el siguiente "orden" disponible — usado por
+// el flujo de solicitud de vehículo, que agrega una fila a la vez sin
+// reemplazar las que ya existen (a diferencia de Actualizar, que reescribe
+// todos los items de una).
+func (r *ProgramacionRepository) AgregarItem(ctx context.Context, programacionID int, item *models.ProgramacionItem) (int, error) {
+	var siguienteOrden int
+	err := r.db.QueryRowContext(ctx,
+		"SELECT COALESCE(MAX(orden), -1) + 1 FROM programacion_items WHERE programacion_id = $1",
+		programacionID,
+	).Scan(&siguienteOrden)
+	if err != nil {
+		return 0, fmt.Errorf("error al calcular el orden del nuevo item: %w", err)
+	}
+
+	origen := item.Origen
+	if origen == "" {
+		origen = "manual"
+	}
+
+	var newID int
+	err = r.db.QueryRowContext(ctx, `
+		INSERT INTO programacion_items
+		  (programacion_id, vehiculo_id, conductor, dependencia, destino,
+		   hora_salida_punto, hora_finalizacion, actividad, es_vacaciones, programado, orden,
+		   motivo, origen, solicitante_nombre, solicitante_email, hora_solicitada, punto_encuentro)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+		RETURNING id
+	`, programacionID, item.VehiculoID, item.Conductor, item.Dependencia,
+		item.Destino, item.HoraSalidaPunto, item.HoraFinalizacion, item.Actividad,
+		item.EsVacaciones, item.Programado, siguienteOrden,
+		item.Motivo, origen, item.SolicitanteNombre, item.SolicitanteEmail,
+		item.HoraSolicitada, item.PuntoEncuentro).Scan(&newID)
+	if err != nil {
+		return 0, fmt.Errorf("error al agregar item a la programación: %w", err)
+	}
+	return newID, nil
+}
+
+// ListarSolicitudesPorEmail devuelve todas las filas (de cualquier
+// programación) que fueron solicitadas por un correo específico —
+// alimenta la pantalla "Mis solicitudes" del rol Solicitante.
+func (r *ProgramacionRepository) ListarSolicitudesPorEmail(ctx context.Context, organizationID int, email string) ([]models.ProgramacionItem, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT pi.id, pi.programacion_id, pi.vehiculo_id,
+		       COALESCE(v.placa, '') AS vehiculo_placa,
+		       pi.conductor, pi.dependencia, pi.destino,
+		       pi.hora_salida_punto, pi.hora_finalizacion, pi.actividad,
+		       pi.es_vacaciones, pi.programado, pi.orden,
+		       pi.motivo, pi.origen, pi.solicitante_nombre, pi.solicitante_email,
+		       TO_CHAR(pi.hora_solicitada, 'HH24:MI') AS hora_solicitada, pi.punto_encuentro,
+		       TO_CHAR(p.fecha, 'YYYY-MM-DD') AS fecha_programacion
+		FROM programacion_items pi
+		JOIN programaciones_vehiculos p ON p.id = pi.programacion_id
+		LEFT JOIN vehiculos v ON v.id = pi.vehiculo_id
+		WHERE p.organization_id = $1 AND pi.solicitante_email = $2
+		ORDER BY p.fecha DESC, pi.id DESC
+	`, organizationID, email)
+	if err != nil {
+		return nil, fmt.Errorf("error al listar solicitudes por email: %w", err)
+	}
+	defer rows.Close()
+
+	var items []models.ProgramacionItem
+	for rows.Next() {
+		var item models.ProgramacionItem
+		var horaSolicitada sql.NullString
+		var fechaProgramacion string
+		if err := rows.Scan(
+			&item.ID, &item.ProgramacionID, &item.VehiculoID, &item.VehiculoPlaca,
+			&item.Conductor, &item.Dependencia, &item.Destino,
+			&item.HoraSalidaPunto, &item.HoraFinalizacion, &item.Actividad,
+			&item.EsVacaciones, &item.Programado, &item.Orden,
+			&item.Motivo, &item.Origen, &item.SolicitanteNombre, &item.SolicitanteEmail,
+			&horaSolicitada, &item.PuntoEncuentro, &fechaProgramacion,
+		); err != nil {
+			return nil, err
+		}
+		if horaSolicitada.Valid {
+			item.HoraSolicitada = &horaSolicitada.String
+		}
+		item.FechaProgramacion = fechaProgramacion
+		items = append(items, item)
+	}
+	return items, nil
+}
+
 // Eliminar borra la cabecera (los items se borran por CASCADE).
 func (r *ProgramacionRepository) Eliminar(ctx context.Context, organizationID, id int) error {
 	result, err := r.db.ExecContext(ctx,
@@ -189,7 +301,9 @@ func (r *ProgramacionRepository) listarItems(ctx context.Context, programacionID
 		       COALESCE(v.placa, '') AS vehiculo_placa,
 		       pi.conductor, pi.dependencia, pi.destino,
 		       pi.hora_salida_punto, pi.hora_finalizacion, pi.actividad,
-		       pi.es_vacaciones, pi.programado, pi.orden
+		       pi.es_vacaciones, pi.programado, pi.orden,
+		       pi.motivo, pi.origen, pi.solicitante_nombre, pi.solicitante_email,
+		       TO_CHAR(pi.hora_solicitada, 'HH24:MI') AS hora_solicitada, pi.punto_encuentro
 		FROM programacion_items pi
 		LEFT JOIN vehiculos v ON v.id = pi.vehiculo_id
 		WHERE pi.programacion_id = $1
@@ -203,13 +317,19 @@ func (r *ProgramacionRepository) listarItems(ctx context.Context, programacionID
 	var items []models.ProgramacionItem
 	for rows.Next() {
 		var item models.ProgramacionItem
+		var horaSolicitada sql.NullString
 		if err := rows.Scan(
 			&item.ID, &item.ProgramacionID, &item.VehiculoID, &item.VehiculoPlaca,
 			&item.Conductor, &item.Dependencia, &item.Destino,
 			&item.HoraSalidaPunto, &item.HoraFinalizacion, &item.Actividad,
 			&item.EsVacaciones, &item.Programado, &item.Orden,
+			&item.Motivo, &item.Origen, &item.SolicitanteNombre, &item.SolicitanteEmail,
+			&horaSolicitada, &item.PuntoEncuentro,
 		); err != nil {
 			return nil, err
+		}
+		if horaSolicitada.Valid {
+			item.HoraSolicitada = &horaSolicitada.String
 		}
 		items = append(items, item)
 	}
@@ -218,14 +338,21 @@ func (r *ProgramacionRepository) listarItems(ctx context.Context, programacionID
 
 func insertarItems(ctx context.Context, tx *sql.Tx, programacionID int, items []models.ProgramacionItem) error {
 	for i, item := range items {
+		origen := item.Origen
+		if origen == "" {
+			origen = "manual"
+		}
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO programacion_items
 			  (programacion_id, vehiculo_id, conductor, dependencia, destino,
-			   hora_salida_punto, hora_finalizacion, actividad, es_vacaciones, programado, orden)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			   hora_salida_punto, hora_finalizacion, actividad, es_vacaciones, programado, orden,
+			   motivo, origen, solicitante_nombre, solicitante_email, hora_solicitada, punto_encuentro)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		`, programacionID, item.VehiculoID, item.Conductor, item.Dependencia,
 			item.Destino, item.HoraSalidaPunto, item.HoraFinalizacion, item.Actividad,
-			item.EsVacaciones, item.Programado, i)
+			item.EsVacaciones, item.Programado, i,
+			item.Motivo, origen, item.SolicitanteNombre, item.SolicitanteEmail,
+			item.HoraSolicitada, item.PuntoEncuentro)
 		if err != nil {
 			return fmt.Errorf("error al insertar item %d: %w", i, err)
 		}
