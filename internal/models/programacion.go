@@ -30,15 +30,21 @@ type Programacion struct {
 
 // ProgramacionItem es una fila de la programación (un conductor asignado).
 type ProgramacionItem struct {
-	ID              int    `json:"id" db:"id"`
-	ProgramacionID  int    `json:"programacion_id" db:"programacion_id"`
-	VehiculoID      *int   `json:"vehiculo_id,omitempty" db:"vehiculo_id"`
-	VehiculoPlaca   string `json:"vehiculo_placa,omitempty" db:"vehiculo_placa"`
-	Conductor       string `json:"conductor" db:"conductor"`
-	Dependencia     string `json:"dependencia" db:"dependencia"`
-	Destino         string `json:"destino" db:"destino"`
-	HoraSalidaPunto string `json:"hora_salida_punto" db:"hora_salida_punto"`
-	Actividad       string `json:"actividad" db:"actividad"`
-	EsVacaciones    bool   `json:"es_vacaciones" db:"es_vacaciones"`
-	Orden           int    `json:"orden" db:"orden"`
+	ID               int    `json:"id" db:"id"`
+	ProgramacionID   int    `json:"programacion_id" db:"programacion_id"`
+	VehiculoID       *int   `json:"vehiculo_id,omitempty" db:"vehiculo_id"`
+	VehiculoPlaca    string `json:"vehiculo_placa,omitempty" db:"vehiculo_placa"`
+	Conductor        string `json:"conductor" db:"conductor"`
+	Dependencia      string `json:"dependencia" db:"dependencia"`
+	Destino          string `json:"destino" db:"destino"`
+	HoraSalidaPunto  string `json:"hora_salida_punto" db:"hora_salida_punto"`
+	HoraFinalizacion string `json:"hora_finalizacion" db:"hora_finalizacion"`
+	Actividad        string `json:"actividad" db:"actividad"`
+	EsVacaciones     bool   `json:"es_vacaciones" db:"es_vacaciones"`
+	// Programado controla si la fila se incluye en el PDF/planilla final:
+	// solo las filas con Programado = true aparecen en la vista de
+	// impresión, permitiendo dejar borradores/filas en construcción sin
+	// que salgan en el documento oficial que se genera al guardar.
+	Programado bool `json:"programado" db:"programado"`
+	Orden      int  `json:"orden" db:"orden"`
 }

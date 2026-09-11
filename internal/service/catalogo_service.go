@@ -18,10 +18,10 @@ func NewCatalogoService(repo *repository.CatalogoRepository) *CatalogoService {
 // TodosLosCatalogos agrupa lo que el frontend necesita para poblar selects de
 // formularios y filtros, en una sola llamada al cargar la aplicación.
 type TodosLosCatalogos struct {
-	Roles            []models.Rol            `json:"roles"`
-	EstadosVehiculo  []models.EstadoVehiculo `json:"estados_vehiculo"`
-	TiposVehiculo    []models.TipoVehiculo   `json:"tipos_vehiculo"`
-	TiposDocumento   []models.TipoDocumento  `json:"tipos_documento"`
+	Roles           []models.Rol            `json:"roles"`
+	EstadosVehiculo []models.EstadoVehiculo `json:"estados_vehiculo"`
+	TiposVehiculo   []models.TipoVehiculo   `json:"tipos_vehiculo"`
+	TiposDocumento  []models.TipoDocumento  `json:"tipos_documento"`
 }
 
 func (s *CatalogoService) ObtenerTodos(ctx context.Context) (*TodosLosCatalogos, error) {
@@ -48,4 +48,18 @@ func (s *CatalogoService) ObtenerTodos(ctx context.Context) (*TodosLosCatalogos,
 		TiposVehiculo:   tiposVehiculo,
 		TiposDocumento:  tiposDocumento,
 	}, nil
+}
+
+// ── Gestión de tipos de vehículo desde Administración → Listas ─────────────
+
+func (s *CatalogoService) ListarTodosTiposVehiculo(ctx context.Context) ([]models.TipoVehiculo, error) {
+	return s.repo.ListTodosTiposVehiculo(ctx)
+}
+
+func (s *CatalogoService) CrearTipoVehiculo(ctx context.Context, nombre string) (int, error) {
+	return s.repo.CrearTipoVehiculo(ctx, nombre)
+}
+
+func (s *CatalogoService) ActualizarTipoVehiculo(ctx context.Context, id int, nombre string, activo bool) error {
+	return s.repo.ActualizarTipoVehiculo(ctx, id, nombre, activo)
 }

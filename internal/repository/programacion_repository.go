@@ -178,7 +178,8 @@ func (r *ProgramacionRepository) listarItems(ctx context.Context, programacionID
 		SELECT pi.id, pi.programacion_id, pi.vehiculo_id,
 		       COALESCE(v.placa, '') AS vehiculo_placa,
 		       pi.conductor, pi.dependencia, pi.destino,
-		       pi.hora_salida_punto, pi.actividad, pi.es_vacaciones, pi.orden
+		       pi.hora_salida_punto, pi.hora_finalizacion, pi.actividad,
+		       pi.es_vacaciones, pi.programado, pi.orden
 		FROM programacion_items pi
 		LEFT JOIN vehiculos v ON v.id = pi.vehiculo_id
 		WHERE pi.programacion_id = $1
@@ -195,7 +196,8 @@ func (r *ProgramacionRepository) listarItems(ctx context.Context, programacionID
 		if err := rows.Scan(
 			&item.ID, &item.ProgramacionID, &item.VehiculoID, &item.VehiculoPlaca,
 			&item.Conductor, &item.Dependencia, &item.Destino,
-			&item.HoraSalidaPunto, &item.Actividad, &item.EsVacaciones, &item.Orden,
+			&item.HoraSalidaPunto, &item.HoraFinalizacion, &item.Actividad,
+			&item.EsVacaciones, &item.Programado, &item.Orden,
 		); err != nil {
 			return nil, err
 		}
@@ -209,10 +211,11 @@ func insertarItems(ctx context.Context, tx *sql.Tx, programacionID int, items []
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO programacion_items
 			  (programacion_id, vehiculo_id, conductor, dependencia, destino,
-			   hora_salida_punto, actividad, es_vacaciones, orden)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			   hora_salida_punto, hora_finalizacion, actividad, es_vacaciones, programado, orden)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		`, programacionID, item.VehiculoID, item.Conductor, item.Dependencia,
-			item.Destino, item.HoraSalidaPunto, item.Actividad, item.EsVacaciones, i)
+			item.Destino, item.HoraSalidaPunto, item.HoraFinalizacion, item.Actividad,
+			item.EsVacaciones, item.Programado, i)
 		if err != nil {
 			return fmt.Errorf("error al insertar item %d: %w", i, err)
 		}

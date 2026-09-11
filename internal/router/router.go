@@ -65,6 +65,14 @@ func Setup(cfg *config.Config, corsOrigins []string, h Handlers) *gin.Engine {
 			protected.GET("/tema", h.Tema.ObtenerPropio)
 			protected.GET("/organizacion", h.Organizacion.ObtenerPropia)
 
+			// Gestión de tipos de vehículo desde Administración → Listas
+			tiposVehiculo := protected.Group("/catalogos/tipos-vehiculo")
+			{
+				tiposVehiculo.GET("/todos", h.Catalogo.ListarTodosTiposVehiculo)
+				tiposVehiculo.POST("", middleware.RequireRoles("Administrador"), h.Catalogo.CrearTipoVehiculo)
+				tiposVehiculo.PUT("/:id", middleware.RequireRoles("Administrador"), h.Catalogo.ActualizarTipoVehiculo)
+			}
+
 			vehiculos := protected.Group("/vehiculos")
 			{
 				vehiculos.GET("", h.Vehiculo.List)

@@ -61,8 +61,11 @@ type EstadoVehiculo struct {
 	Nombre string `json:"nombre" db:"nombre"`
 }
 
-// TipoVehiculo catálogo de tipos de vehículo.
+// TipoVehiculo catálogo de tipos de vehículo. Activo permite ocultar un tipo
+// del formulario de creación sin borrar la fila (evita romper vehículos ya
+// registrados con ese tipo — integridad referencial).
 type TipoVehiculo struct {
 	ID     int    `json:"id" db:"id"`
 	Nombre string `json:"nombre" db:"nombre"`
+	Activo bool   `json:"activo" db:"activo"`
 }
