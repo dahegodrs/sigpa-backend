@@ -77,6 +77,45 @@ func (h *UsuarioHandler) List(c *gin.Context) {
 	response.Success(c, http.StatusOK, usuarios)
 }
 
+type actualizarDatosRequest struct {
+	Nombre string `json:"nombre" binding:"required"`
+	Email  string `json:"email" binding:"required,email"`
+}
+
+// PUT /api/v1/usuarios/:id/datos
+// Permite a un Administrador corregir el nombre y/o correo de un usuario
+// (ej. un error de tipeo al invitarlo), sin afectar su rol/dependencia.
+func (h *UsuarioHandler) ActualizarDatos(c *gin.Context) {
+	orgID := middleware.OrganizationID(c)
+	ejecutadoPor := middleware.UserID(c)
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "id inválido")
+		return
+	}
+
+	var body actualizarDatosRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		response.Error(c, http.StatusBadRequest, "nombre y correo válidos son requeridos")
+		return
+	}
+
+	err = h.service.ActualizarDatos(c.Request.Context(), orgID, id, body.Nombre, body.Email, ejecutadoPor)
+	if errors.Is(err, apperrors.ErrNotFound) {
+		response.Error(c, http.StatusNotFound, "usuario no encontrado")
+		return
+	}
+	if errors.Is(err, apperrors.ErrDuplicado) {
+		response.Error(c, http.StatusConflict, "ya existe otro usuario con ese correo")
+		return
+	}
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.Success(c, http.StatusOK, gin.H{"actualizado": true})
+}
+
 type actualizarRolRequest struct {
 	RolID         int  `json:"rol_id" binding:"required"`
 	DependenciaID *int `json:"dependencia_id"`

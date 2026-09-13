@@ -128,6 +128,36 @@ func (r *UsuarioRepository) Create(ctx context.Context, u *models.Usuario) (int,
 	return newID, nil
 }
 
+// ActualizarDatos permite a un Administrador corregir el nombre y/o correo
+// de un usuario (por ejemplo, un error de tipeo al invitarlo). Se valida
+// que el nuevo correo no esté en uso por otro usuario para no violar la
+// restricción UNIQUE de la tabla.
+func (r *UsuarioRepository) ActualizarDatos(ctx context.Context, organizationID, id int, nombre, email string) error {
+	var existeID int
+	err := r.db.QueryRowContext(ctx,
+		"SELECT id FROM usuarios WHERE email = $1 AND id != $2", email, id,
+	).Scan(&existeID)
+	if err == nil {
+		return apperrors.ErrDuplicado
+	}
+	if err != sql.ErrNoRows {
+		return fmt.Errorf("error al validar correo duplicado: %w", err)
+	}
+
+	result, err := r.db.ExecContext(ctx,
+		"UPDATE usuarios SET nombre = $1, email = $2 WHERE id = $3 AND organization_id = $4",
+		nombre, email, id, organizationID,
+	)
+	if err != nil {
+		return fmt.Errorf("error al actualizar datos del usuario: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return apperrors.ErrNotFound
+	}
+	return nil
+}
+
 // ActualizarRolYDependencia permite a un Administrador asignar rol/dependencia desde el panel de Administración.
 func (r *UsuarioRepository) ActualizarRolYDependencia(ctx context.Context, organizationID, id, rolID int, dependenciaID *int) error {
 	query := `

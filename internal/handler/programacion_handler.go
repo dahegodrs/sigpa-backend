@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -265,13 +266,14 @@ func (h *ProgramacionHandler) Eliminar(c *gin.Context) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type solicitudVehiculoRequest struct {
-	Fecha          string `json:"fecha" binding:"required"`           // "YYYY-MM-DD"
-	HoraSolicitada string `json:"hora_solicitada" binding:"required"` // "HH:MM"
-	PuntoEncuentro string `json:"punto_encuentro" binding:"required"`
-	Destino        string `json:"destino" binding:"required"`
-	Actividad      string `json:"actividad" binding:"required"`
-	Motivo         string `json:"motivo" binding:"required"`
-	Dependencia    string `json:"dependencia"`
+	Fecha            string `json:"fecha" binding:"required"`             // "YYYY-MM-DD"
+	HoraSolicitada   string `json:"hora_solicitada" binding:"required"`   // "HH:MM"
+	HoraFinalizacion string `json:"hora_finalizacion" binding:"required"` // "HH:MM"
+	PuntoEncuentro   string `json:"punto_encuentro" binding:"required"`
+	Destino          string `json:"destino" binding:"required"`
+	Actividad        string `json:"actividad" binding:"required"`
+	Motivo           string `json:"motivo" binding:"required"`
+	Dependencia      string `json:"dependencia"`
 }
 
 // POST /api/v1/solicitudes-vehiculo
@@ -294,7 +296,15 @@ func (h *ProgramacionHandler) SolicitarVehiculo(c *gin.Context) {
 
 	var body solicitudVehiculoRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
-		response.Error(c, http.StatusBadRequest, "todos los campos son requeridos: fecha, hora_solicitada, punto_encuentro, destino, actividad, motivo")
+		response.Error(c, http.StatusBadRequest, "todos los campos son requeridos: fecha, hora_solicitada, hora_finalizacion, punto_encuentro, destino, actividad, motivo")
+		return
+	}
+
+	// La fecha del servicio no puede ser anterior a hoy — se valida en el
+	// backend además del frontend, ya que el frontend es fácilmente evadible.
+	hoy := time.Now().Format("2006-01-02")
+	if body.Fecha < hoy {
+		response.Error(c, http.StatusBadRequest, "la fecha del servicio no puede ser anterior a hoy")
 		return
 	}
 
@@ -320,7 +330,7 @@ func (h *ProgramacionHandler) SolicitarVehiculo(c *gin.Context) {
 		Dependencia:       dependencia,
 		Destino:           body.Destino,
 		HoraSalidaPunto:   horaSalidaPunto,
-		HoraFinalizacion:  "DISPONIBLE PATIO",
+		HoraFinalizacion:  body.HoraFinalizacion,
 		Actividad:         body.Actividad,
 		EsVacaciones:      false,
 		Programado:        false,

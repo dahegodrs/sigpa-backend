@@ -106,6 +106,7 @@ func Setup(cfg *config.Config, corsOrigins []string, h Handlers) *gin.Engine {
 			{
 				usuarios.GET("", h.Usuario.List)
 				usuarios.POST("", h.Usuario.Invitar)
+				usuarios.PUT("/:id/datos", h.Usuario.ActualizarDatos)
 				usuarios.PUT("/:id/rol", h.Usuario.ActualizarRol)
 				usuarios.PUT("/:id/activo", h.Usuario.ActualizarActivo)
 			}

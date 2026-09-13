@@ -16,9 +16,9 @@ import (
 const rolConsultaPorDefecto = "Consulta"
 
 type UsuarioService struct {
-	repo           *repository.UsuarioRepository
-	catalogoRepo   *repository.CatalogoRepository
-	historialRepo  *repository.HistorialRepository
+	repo          *repository.UsuarioRepository
+	catalogoRepo  *repository.CatalogoRepository
+	historialRepo *repository.HistorialRepository
 }
 
 func NewUsuarioService(repo *repository.UsuarioRepository, catalogoRepo *repository.CatalogoRepository, historialRepo *repository.HistorialRepository) *UsuarioService {
@@ -132,6 +132,23 @@ func (s *UsuarioService) BuscarPorEmail(ctx context.Context, email string) (*mod
 
 func (s *UsuarioService) List(ctx context.Context, organizationID int, rolID, dependenciaID *int) ([]models.Usuario, error) {
 	return s.repo.List(ctx, organizationID, rolID, dependenciaID)
+}
+
+// ActualizarDatos permite a un Administrador corregir el nombre y/o correo
+// de un usuario después de haberlo invitado (ej. un error de tipeo).
+func (s *UsuarioService) ActualizarDatos(ctx context.Context, organizationID, id int, nombre, email string, ejecutadoPor int) error {
+	if err := s.repo.ActualizarDatos(ctx, organizationID, id, nombre, email); err != nil {
+		return err
+	}
+	_ = s.historialRepo.Registrar(ctx, &models.HistorialCambio{
+		OrganizationID:  organizationID,
+		Entidad:         "usuario",
+		EntidadID:       id,
+		UsuarioID:       &ejecutadoPor,
+		Accion:          "ACTUALIZACION",
+		CampoModificado: strPtr("nombre/email"),
+	})
+	return nil
 }
 
 func (s *UsuarioService) ActualizarRolYDependencia(ctx context.Context, organizationID, id, rolID int, dependenciaID *int, ejecutadoPor int) error {
