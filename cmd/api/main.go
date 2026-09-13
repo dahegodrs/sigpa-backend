@@ -104,6 +104,7 @@ func main() {
 	// --- Repositorios adicionales ---
 	listaRepo := repository.NewListaRepository(db)
 	programacionRepo := repository.NewProgramacionRepository(db)
+	plantillaCorreoRepo := repository.NewPlantillaCorreoRepository(db)
 
 	// --- Servicios ---
 	vehiculoSvc := service.NewVehiculoService(vehiculoRepo, historialRepo)
@@ -115,7 +116,7 @@ func main() {
 	catalogoSvc := service.NewCatalogoService(catalogoRepo)
 	temaSvc := service.NewTemaService(organizacionRepo)
 	listaSvc := service.NewListaService(listaRepo)
-	programacionSvc := service.NewProgramacionService(programacionRepo)
+	programacionSvc := service.NewProgramacionService(programacionRepo, plantillaCorreoRepo, notificador)
 
 	// --- Handlers ---
 	handlers := router.Handlers{

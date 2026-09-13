@@ -210,24 +210,119 @@ func (r *ProgramacionRepository) AgregarItem(ctx context.Context, programacionID
 	if origen == "" {
 		origen = "manual"
 	}
+	estadoSolicitud := item.EstadoSolicitud
+	if estadoSolicitud == "" {
+		estadoSolicitud = "pendiente"
+	}
 
 	var newID int
 	err = r.db.QueryRowContext(ctx, `
 		INSERT INTO programacion_items
 		  (programacion_id, vehiculo_id, conductor, dependencia, destino,
 		   hora_salida_punto, hora_finalizacion, actividad, es_vacaciones, programado, orden,
-		   motivo, origen, solicitante_nombre, solicitante_email, hora_solicitada, punto_encuentro)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+		   motivo, origen, solicitante_nombre, solicitante_email, hora_solicitada, punto_encuentro,
+		   estado_solicitud)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 		RETURNING id
 	`, programacionID, item.VehiculoID, item.Conductor, item.Dependencia,
 		item.Destino, item.HoraSalidaPunto, item.HoraFinalizacion, item.Actividad,
 		item.EsVacaciones, item.Programado, siguienteOrden,
 		item.Motivo, origen, item.SolicitanteNombre, item.SolicitanteEmail,
-		item.HoraSolicitada, item.PuntoEncuentro).Scan(&newID)
+		item.HoraSolicitada, item.PuntoEncuentro, estadoSolicitud).Scan(&newID)
 	if err != nil {
 		return 0, fmt.Errorf("error al agregar item a la programación: %w", err)
 	}
 	return newID, nil
+}
+
+// ActualizarEstadoItem aprueba o rechaza UNA fila de solicitud puntual sin
+// tener que reescribir toda la programación — usado por los botones
+// rápidos ✅/❌ en "Editar Programación". No marca notificado_en: eso lo
+// hace el flujo de envío de correo al guardar, una vez el mensaje sale.
+func (r *ProgramacionRepository) ActualizarEstadoItem(ctx context.Context, itemID int, estado string, motivoRechazo *string) error {
+	result, err := r.db.ExecContext(ctx,
+		"UPDATE programacion_items SET estado_solicitud = $1, motivo_rechazo = $2 WHERE id = $3",
+		estado, motivoRechazo, itemID,
+	)
+	if err != nil {
+		return fmt.Errorf("error al actualizar estado de la solicitud: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return apperrors.ErrNotFound
+	}
+	return nil
+}
+
+// ListarDecisionesSinNotificar devuelve las filas de una programación que
+// ya tienen una decisión tomada (aprobada/rechazada) pero todavía no se le
+// ha avisado al solicitante — es la base para armar el correo consolidado.
+func (r *ProgramacionRepository) ListarDecisionesSinNotificar(ctx context.Context, programacionID int) ([]models.ProgramacionItem, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT pi.id, pi.programacion_id, pi.vehiculo_id,
+		       COALESCE(v.placa, '') AS vehiculo_placa,
+		       pi.conductor, pi.dependencia, pi.destino,
+		       pi.hora_salida_punto, pi.hora_finalizacion, pi.actividad,
+		       pi.es_vacaciones, pi.programado, pi.orden,
+		       pi.motivo, pi.origen, pi.solicitante_nombre, pi.solicitante_email,
+		       TO_CHAR(pi.hora_solicitada, 'HH24:MI') AS hora_solicitada, pi.punto_encuentro,
+		       pi.estado_solicitud, pi.motivo_rechazo
+		FROM programacion_items pi
+		LEFT JOIN vehiculos v ON v.id = pi.vehiculo_id
+		WHERE pi.programacion_id = $1
+		  AND pi.origen = 'solicitud'
+		  AND pi.estado_solicitud != 'pendiente'
+		  AND pi.notificado_en IS NULL
+	`, programacionID)
+	if err != nil {
+		return nil, fmt.Errorf("error al listar decisiones sin notificar: %w", err)
+	}
+	defer rows.Close()
+
+	var items []models.ProgramacionItem
+	for rows.Next() {
+		var item models.ProgramacionItem
+		var horaSolicitada sql.NullString
+		if err := rows.Scan(
+			&item.ID, &item.ProgramacionID, &item.VehiculoID, &item.VehiculoPlaca,
+			&item.Conductor, &item.Dependencia, &item.Destino,
+			&item.HoraSalidaPunto, &item.HoraFinalizacion, &item.Actividad,
+			&item.EsVacaciones, &item.Programado, &item.Orden,
+			&item.Motivo, &item.Origen, &item.SolicitanteNombre, &item.SolicitanteEmail,
+			&horaSolicitada, &item.PuntoEncuentro,
+			&item.EstadoSolicitud, &item.MotivoRechazo,
+		); err != nil {
+			return nil, err
+		}
+		if horaSolicitada.Valid {
+			item.HoraSolicitada = &horaSolicitada.String
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+// MarcarNotificados marca un conjunto de items como ya notificados, para
+// que no se vuelvan a incluir en un correo futuro.
+func (r *ProgramacionRepository) MarcarNotificados(ctx context.Context, itemIDs []int) error {
+	if len(itemIDs) == 0 {
+		return nil
+	}
+	placeholders := ""
+	args := []interface{}{}
+	for i, id := range itemIDs {
+		if i > 0 {
+			placeholders += ","
+		}
+		placeholders += fmt.Sprintf("$%d", i+1)
+		args = append(args, id)
+	}
+	query := fmt.Sprintf("UPDATE programacion_items SET notificado_en = NOW() WHERE id IN (%s)", placeholders)
+	_, err := r.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("error al marcar items como notificados: %w", err)
+	}
+	return nil
 }
 
 // ListarSolicitudesPorEmail devuelve todas las filas (de cualquier
@@ -242,6 +337,7 @@ func (r *ProgramacionRepository) ListarSolicitudesPorEmail(ctx context.Context, 
 		       pi.es_vacaciones, pi.programado, pi.orden,
 		       pi.motivo, pi.origen, pi.solicitante_nombre, pi.solicitante_email,
 		       TO_CHAR(pi.hora_solicitada, 'HH24:MI') AS hora_solicitada, pi.punto_encuentro,
+		       pi.estado_solicitud, pi.motivo_rechazo,
 		       TO_CHAR(p.fecha, 'YYYY-MM-DD') AS fecha_programacion
 		FROM programacion_items pi
 		JOIN programaciones_vehiculos p ON p.id = pi.programacion_id
@@ -265,7 +361,8 @@ func (r *ProgramacionRepository) ListarSolicitudesPorEmail(ctx context.Context, 
 			&item.HoraSalidaPunto, &item.HoraFinalizacion, &item.Actividad,
 			&item.EsVacaciones, &item.Programado, &item.Orden,
 			&item.Motivo, &item.Origen, &item.SolicitanteNombre, &item.SolicitanteEmail,
-			&horaSolicitada, &item.PuntoEncuentro, &fechaProgramacion,
+			&horaSolicitada, &item.PuntoEncuentro,
+			&item.EstadoSolicitud, &item.MotivoRechazo, &fechaProgramacion,
 		); err != nil {
 			return nil, err
 		}
@@ -303,7 +400,8 @@ func (r *ProgramacionRepository) listarItems(ctx context.Context, programacionID
 		       pi.hora_salida_punto, pi.hora_finalizacion, pi.actividad,
 		       pi.es_vacaciones, pi.programado, pi.orden,
 		       pi.motivo, pi.origen, pi.solicitante_nombre, pi.solicitante_email,
-		       TO_CHAR(pi.hora_solicitada, 'HH24:MI') AS hora_solicitada, pi.punto_encuentro
+		       TO_CHAR(pi.hora_solicitada, 'HH24:MI') AS hora_solicitada, pi.punto_encuentro,
+		       pi.estado_solicitud, pi.motivo_rechazo
 		FROM programacion_items pi
 		LEFT JOIN vehiculos v ON v.id = pi.vehiculo_id
 		WHERE pi.programacion_id = $1
@@ -325,6 +423,7 @@ func (r *ProgramacionRepository) listarItems(ctx context.Context, programacionID
 			&item.EsVacaciones, &item.Programado, &item.Orden,
 			&item.Motivo, &item.Origen, &item.SolicitanteNombre, &item.SolicitanteEmail,
 			&horaSolicitada, &item.PuntoEncuentro,
+			&item.EstadoSolicitud, &item.MotivoRechazo,
 		); err != nil {
 			return nil, err
 		}
@@ -342,17 +441,22 @@ func insertarItems(ctx context.Context, tx *sql.Tx, programacionID int, items []
 		if origen == "" {
 			origen = "manual"
 		}
+		estadoSolicitud := item.EstadoSolicitud
+		if estadoSolicitud == "" {
+			estadoSolicitud = "pendiente"
+		}
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO programacion_items
 			  (programacion_id, vehiculo_id, conductor, dependencia, destino,
 			   hora_salida_punto, hora_finalizacion, actividad, es_vacaciones, programado, orden,
-			   motivo, origen, solicitante_nombre, solicitante_email, hora_solicitada, punto_encuentro)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+			   motivo, origen, solicitante_nombre, solicitante_email, hora_solicitada, punto_encuentro,
+			   estado_solicitud, motivo_rechazo)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		`, programacionID, item.VehiculoID, item.Conductor, item.Dependencia,
 			item.Destino, item.HoraSalidaPunto, item.HoraFinalizacion, item.Actividad,
 			item.EsVacaciones, item.Programado, i,
 			item.Motivo, origen, item.SolicitanteNombre, item.SolicitanteEmail,
-			item.HoraSolicitada, item.PuntoEncuentro)
+			item.HoraSolicitada, item.PuntoEncuentro, estadoSolicitud, item.MotivoRechazo)
 		if err != nil {
 			return fmt.Errorf("error al insertar item %d: %w", i, err)
 		}

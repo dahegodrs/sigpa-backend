@@ -70,4 +70,30 @@ type ProgramacionItem struct {
 	// con la cabecera), para que "Mis solicitudes" pueda mostrar en qué
 	// fecha quedó registrado el servicio sin tener que hacer otra consulta.
 	FechaProgramacion string `json:"fecha_programacion,omitempty" db:"-"`
+
+	// ── Estado explícito de la solicitud (timeline tipo pasarela) ──────────
+	// EstadoSolicitud es independiente de Programado: permite que el
+	// director rechace una solicitud sin necesidad de asignarle vehículo
+	// primero, y le da al solicitante un timeline claro en "Mis solicitudes"
+	// (Solicitado → En espera de aprobación → Aprobada/Rechazada).
+	EstadoSolicitud string  `json:"estado_solicitud" db:"estado_solicitud"`
+	MotivoRechazo   *string `json:"motivo_rechazo,omitempty" db:"motivo_rechazo"`
+	// NotificadoEn marca si ya se le envió correo al solicitante sobre esta
+	// fila — evita reenviar la misma decisión si el director guarda de
+	// nuevo, y permite agrupar en un solo correo todas las filas de un
+	// mismo solicitante que aún no se le han notificado.
+	NotificadoEn *time.Time `json:"notificado_en,omitempty" db:"notificado_en"`
+}
+
+// PlantillaCorreo es una plantilla de correo configurable por organización
+// (ej. la notificación de aprobación/rechazo de solicitud de vehículo),
+// guardada en base de datos para que la vean/editen todos los
+// Administradores en vez de quedar en el localStorage de un solo navegador.
+type PlantillaCorreo struct {
+	ID                 int       `json:"id" db:"id"`
+	OrganizationID     int       `json:"organization_id" db:"organization_id"`
+	Tipo               string    `json:"tipo" db:"tipo"`
+	Asunto             string    `json:"asunto" db:"asunto"`
+	CuerpoHTML         string    `json:"cuerpo_html" db:"cuerpo_html"`
+	FechaActualizacion time.Time `json:"fecha_actualizacion" db:"fecha_actualizacion"`
 }

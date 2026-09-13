@@ -369,3 +369,84 @@ func (h *ProgramacionHandler) MisSolicitudes(c *gin.Context) {
 	}
 	response.Success(c, http.StatusOK, items)
 }
+
+// PUT /api/v1/programaciones/items/:itemId/aprobar
+// Marca una fila de solicitud como aprobada. El envío del correo
+// consolidado ocurre cuando el director guarda la programación completa
+// (botón "Guardar cambios"), no en este momento — así se agrupan todas las
+// decisiones tomadas en la misma sesión de edición en un solo correo.
+func (h *ProgramacionHandler) AprobarSolicitud(c *gin.Context) {
+	itemID, err := strconv.Atoi(c.Param("itemId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "id de item inválido")
+		return
+	}
+	if err := h.svc.AprobarItem(c.Request.Context(), itemID); err != nil {
+		if errors.Is(err, apperrors.ErrNotFound) {
+			response.Error(c, http.StatusNotFound, "item no encontrado")
+			return
+		}
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.Success(c, http.StatusOK, gin.H{"aprobado": true})
+}
+
+type rechazarSolicitudRequest struct {
+	Motivo string `json:"motivo" binding:"required"`
+}
+
+// PUT /api/v1/programaciones/items/:itemId/rechazar
+// Marca una fila de solicitud como rechazada con un motivo obligatorio,
+// que se le mostrará al solicitante en el correo consolidado y en su
+// timeline de "Mis solicitudes".
+func (h *ProgramacionHandler) RechazarSolicitud(c *gin.Context) {
+	itemID, err := strconv.Atoi(c.Param("itemId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "id de item inválido")
+		return
+	}
+	var body rechazarSolicitudRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		response.Error(c, http.StatusBadRequest, "el motivo de rechazo es obligatorio")
+		return
+	}
+	if err := h.svc.RechazarItem(c.Request.Context(), itemID, body.Motivo); err != nil {
+		if errors.Is(err, apperrors.ErrNotFound) {
+			response.Error(c, http.StatusNotFound, "item no encontrado")
+			return
+		}
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.Success(c, http.StatusOK, gin.H{"rechazado": true})
+}
+
+// GET /api/v1/plantillas-correo/solicitud-vehiculo
+// Devuelve la plantilla configurable de notificación a solicitantes, para
+// que el Administrador la edite desde el Centro de Programación.
+func (h *ProgramacionHandler) ObtenerPlantillaSolicitud(c *gin.Context) {
+	orgID := middleware.OrganizationID(c)
+	asunto, cuerpo := h.svc.ObtenerPlantillaSolicitud(c.Request.Context(), orgID)
+	response.Success(c, http.StatusOK, gin.H{"asunto": asunto, "cuerpo_html": cuerpo})
+}
+
+type plantillaSolicitudRequest struct {
+	Asunto     string `json:"asunto" binding:"required"`
+	CuerpoHTML string `json:"cuerpo_html" binding:"required"`
+}
+
+// PUT /api/v1/plantillas-correo/solicitud-vehiculo
+func (h *ProgramacionHandler) GuardarPlantillaSolicitud(c *gin.Context) {
+	orgID := middleware.OrganizationID(c)
+	var body plantillaSolicitudRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		response.Error(c, http.StatusBadRequest, "asunto y cuerpo son requeridos")
+		return
+	}
+	if err := h.svc.GuardarPlantillaSolicitud(c.Request.Context(), orgID, body.Asunto, body.CuerpoHTML); err != nil {
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.Success(c, http.StatusOK, gin.H{"guardado": true})
+}

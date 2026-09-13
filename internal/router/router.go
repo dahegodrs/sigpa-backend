@@ -156,6 +156,24 @@ func Setup(cfg *config.Config, corsOrigins []string, h Handlers) *gin.Engine {
 				programaciones.GET("/:id", h.Programacion.Obtener)
 				programaciones.PUT("/:id", middleware.RequireRoles("Administrador", "Dependencia"), h.Programacion.Actualizar)
 				programaciones.DELETE("/:id", middleware.RequireRoles("Administrador"), h.Programacion.Eliminar)
+
+				// Aprobar/rechazar una fila de solicitud puntual, sin
+				// tener que guardar toda la programación — usado por los
+				// botones rápidos ✅/❌ en "Editar Programación".
+				programaciones.PUT("/items/:itemId/aprobar",
+					middleware.RequireRoles("Administrador", "Dependencia"), h.Programacion.AprobarSolicitud)
+				programaciones.PUT("/items/:itemId/rechazar",
+					middleware.RequireRoles("Administrador", "Dependencia"), h.Programacion.RechazarSolicitud)
+			}
+
+			// Plantilla configurable del correo de notificación a
+			// solicitantes (aprobación/rechazo), editable desde el Centro
+			// de Programación.
+			plantillasCorreo := protected.Group("/plantillas-correo")
+			{
+				plantillasCorreo.GET("/solicitud-vehiculo", h.Programacion.ObtenerPlantillaSolicitud)
+				plantillasCorreo.PUT("/solicitud-vehiculo",
+					middleware.RequireRoles("Administrador"), h.Programacion.GuardarPlantillaSolicitud)
 			}
 
 			// Solicitud de vehículo (formulario que reemplaza el correo
