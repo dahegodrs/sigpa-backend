@@ -63,12 +63,49 @@ func (s *ProgramacionService) Crear(ctx context.Context, p *models.Programacion)
 // consolidado por solicitante después de persistir los cambios. El envío
 // no bloquea ni hace fallar el guardado si algo sale mal — se registra en
 // el log y el director puede seguir trabajando normalmente.
+//
+// Antes de guardar, se preservan las filas ya notificadas: una vez que se
+// le avisó por correo al solicitante que su vehículo fue aprobado/
+// rechazado, esa fila queda "congelada" (todos sus campos) para no perder
+// trazabilidad — si el frontend intenta enviar un valor distinto para una
+// fila bloqueada, se ignora y se conserva el original tal como estaba en
+// la base de datos. La única forma de modificarla es que el director la
+// desbloquee explícitamente primero (endpoint Desbloquear).
 func (s *ProgramacionService) Actualizar(ctx context.Context, organizationID, id int, p *models.Programacion) error {
+	actual, err := s.repo.Obtener(ctx, organizationID, id)
+	if err == nil {
+		bloqueadas := map[int]models.ProgramacionItem{}
+		for _, it := range actual.Items {
+			if it.NotificadoEn != nil {
+				bloqueadas[it.ID] = it
+			}
+		}
+		if len(bloqueadas) > 0 {
+			for i, it := range p.Items {
+				if original, existe := bloqueadas[it.ID]; existe {
+					// Se conserva la fila original completa — el
+					// frontend puede haber enviado cambios, pero al
+					// estar notificada no se le permite modificarla.
+					p.Items[i] = original
+				}
+			}
+		}
+	}
+
 	if err := s.repo.Actualizar(ctx, organizationID, id, p); err != nil {
 		return err
 	}
 	go s.notificarDecisionesPendientes(context.Background(), organizationID, id)
 	return nil
+}
+
+// DesbloquearItem limpia notificado_en de una fila ya notificada, para que
+// el director pueda corregirla (ej. el vehículo se dañó y hay que
+// reasignar otro). Es una acción explícita — no ocurre automáticamente —
+// para que quede claro que fue una corrección intencional después de ya
+// haber avisado al solicitante.
+func (s *ProgramacionService) DesbloquearItem(ctx context.Context, itemID int) error {
+	return s.repo.Desbloquear(ctx, itemID)
 }
 
 // AprobarItem marca una fila de solicitud como aprobada (el director ya

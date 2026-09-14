@@ -164,6 +164,8 @@ func Setup(cfg *config.Config, corsOrigins []string, h Handlers) *gin.Engine {
 					middleware.RequireRoles("Administrador", "Dependencia"), h.Programacion.AprobarSolicitud)
 				programaciones.PUT("/items/:itemId/rechazar",
 					middleware.RequireRoles("Administrador", "Dependencia"), h.Programacion.RechazarSolicitud)
+				programaciones.PUT("/items/:itemId/desbloquear",
+					middleware.RequireRoles("Administrador", "Dependencia"), h.Programacion.DesbloquearSolicitud)
 			}
 
 			// Plantilla configurable del correo de notificación a

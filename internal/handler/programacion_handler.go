@@ -422,6 +422,28 @@ func (h *ProgramacionHandler) RechazarSolicitud(c *gin.Context) {
 	response.Success(c, http.StatusOK, gin.H{"rechazado": true})
 }
 
+// PUT /api/v1/programaciones/items/:itemId/desbloquear
+// Permite al director corregir una fila ya notificada (ej. el vehículo se
+// dañó y hay que reasignar otro). Es una acción explícita — se le informa
+// al director que esto puede requerir volver a notificar al solicitante
+// tras el próximo guardado si cambia la decisión de esa fila.
+func (h *ProgramacionHandler) DesbloquearSolicitud(c *gin.Context) {
+	itemID, err := strconv.Atoi(c.Param("itemId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "id de item inválido")
+		return
+	}
+	if err := h.svc.DesbloquearItem(c.Request.Context(), itemID); err != nil {
+		if errors.Is(err, apperrors.ErrNotFound) {
+			response.Error(c, http.StatusNotFound, "item no encontrado")
+			return
+		}
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.Success(c, http.StatusOK, gin.H{"desbloqueado": true})
+}
+
 // GET /api/v1/plantillas-correo/solicitud-vehiculo
 // Devuelve la plantilla configurable de notificación a solicitantes, para
 // que el Administrador la edite desde el Centro de Programación.

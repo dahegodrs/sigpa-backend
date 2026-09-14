@@ -325,6 +325,25 @@ func (r *ProgramacionRepository) MarcarNotificados(ctx context.Context, itemIDs 
 	return nil
 }
 
+// Desbloquear limpia notificado_en de un item específico, permitiendo que
+// el director vuelva a editarlo/reaprobar/rechazarlo. Se usa cuando algo
+// cambió después de haber notificado al solicitante (ej. el vehículo se
+// dañó y hay que reasignar otro) — el director debe usar esto de forma
+// explícita, así queda claro que fue una corrección intencional.
+func (r *ProgramacionRepository) Desbloquear(ctx context.Context, itemID int) error {
+	result, err := r.db.ExecContext(ctx,
+		"UPDATE programacion_items SET notificado_en = NULL WHERE id = $1", itemID,
+	)
+	if err != nil {
+		return fmt.Errorf("error al desbloquear item: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return apperrors.ErrNotFound
+	}
+	return nil
+}
+
 // ListarSolicitudesPorEmail devuelve todas las filas (de cualquier
 // programación) que fueron solicitadas por un correo específico —
 // alimenta la pantalla "Mis solicitudes" del rol Solicitante.
