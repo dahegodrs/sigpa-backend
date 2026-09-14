@@ -12,24 +12,43 @@ import (
 	"github.com/alcaldia/sigpa-backend/pkg/apperrors"
 )
 
-// plantillaPorDefectoSolicitud se usa como respaldo si la organización
-// todavía no tiene una fila en plantillas_correo para 'solicitud_vehiculo'
-// (por ejemplo, en un ambiente de pruebas donde no se corrió la migración
-// con el INSERT inicial). Mantiene la misma identidad visual de Funza.
-const plantillaPorDefectoSolicitud = `<div style="font-family: Segoe UI, Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #222;">
-<div style="background-color: #DA151C; padding: 20px; text-align: center;">
-<h2 style="color: #fff; margin: 0;">Alcaldía de Funza</h2>
-</div>
-<div style="padding: 24px;">
-<p>Hola <strong>{{nombre_solicitante}}</strong>,</p>
-<p>Te informamos el resultado de tu solicitud de vehículo para el día <strong>{{fecha_servicio}}</strong>:</p>
+// plantillaPorDefectoSolicitud es el CUERPO EDITABLE (texto plano, sin
+// HTML) que el Administrador ve y edita desde el diálogo de "Plantilla de
+// notificación". El backend lo envuelve siempre con el wrapper HTML fijo
+// (envolverEnPlantillaHTML) antes de enviarlo — así el usuario nunca ve ni
+// tiene que entender etiquetas <div>/<style>, igual que la plantilla de
+// renovación de documentos.
+const plantillaPorDefectoSolicitud = `Hola {{nombre_solicitante}},
+
+Te informamos el resultado de tu solicitud de vehículo para el día {{fecha_servicio}}:
+
 {{detalle_aprobadas}}
 {{detalle_rechazadas}}
-<p style="margin-top: 24px;">Atentamente,<br/><strong>Patio y Parque Automotor</strong><br/>Alcaldía de Funza — Cundinamarca</p>
-</div>
-</div>`
+
+Cualquier duda, comunícate con el área de Patio y Parque Automotor.
+
+Atentamente,
+Patio y Parque Automotor
+Alcaldía de Funza — Cundinamarca`
 
 const asuntoPorDefectoSolicitud = "Respuesta a tu solicitud de vehículo — {{fecha_servicio}}"
+
+// envolverEnPlantillaHTML aplica el diseño institucional fijo (header rojo
+// con esquinas superiores redondeadas, cuerpo blanco) alrededor del texto
+// plano que escribió el Administrador. Los saltos de línea del texto se
+// convierten a <br> porque el cuerpo del correo es HTML aunque el editor
+// sea de texto plano.
+func envolverEnPlantillaHTML(textoPlano string) string {
+	cuerpoHTML := strings.ReplaceAll(textoPlano, "\n", "<br>")
+	return fmt.Sprintf(`<div style="font-family: Segoe UI, Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #222; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+<div style="background-color: #DA151C; padding: 24px; text-align: center; border-radius: 12px 12px 0 0;">
+<h2 style="color: #fff; margin: 0; font-size: 18px;">Alcaldía de Funza</h2>
+</div>
+<div style="padding: 24px; background-color: #ffffff; line-height: 1.6;">
+%s
+</div>
+</div>`, cuerpoHTML)
+}
 
 type ProgramacionService struct {
 	repo          *repository.ProgramacionRepository
@@ -204,7 +223,11 @@ func (s *ProgramacionService) notificarDecisionesPendientes(ctx context.Context,
 		}
 
 		asuntoFinal := reemplazarVariables(asunto, nombreSolicitante, fechaServicio, "", "")
-		cuerpoFinal := reemplazarVariables(cuerpo, nombreSolicitante, fechaServicio, bloqueAprobadas, bloqueRechazadas)
+		cuerpoTextoFinal := reemplazarVariables(cuerpo, nombreSolicitante, fechaServicio, bloqueAprobadas, bloqueRechazadas)
+		// El Administrador edita texto plano — el wrapper HTML (header rojo
+		// con esquinas redondeadas, etc.) se aplica siempre aquí antes de
+		// enviar, para que nunca tenga que ver ni tocar HTML.
+		cuerpoFinal := envolverEnPlantillaHTML(cuerpoTextoFinal)
 
 		if err := s.notificador.EnviarCorreo(ctx, email, asuntoFinal, cuerpoFinal); err != nil {
 			log.Printf("error al enviar correo de solicitud a %s: %v", email, err)

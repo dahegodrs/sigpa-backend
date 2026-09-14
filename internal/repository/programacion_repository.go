@@ -257,6 +257,9 @@ func (r *ProgramacionRepository) ActualizarEstadoItem(ctx context.Context, itemI
 // ListarDecisionesSinNotificar devuelve las filas de una programación que
 // ya tienen una decisión tomada (aprobada/rechazada) pero todavía no se le
 // ha avisado al solicitante — es la base para armar el correo consolidado.
+// Incluye la fecha de la programación (join con la cabecera) porque el
+// correo de notificación la necesita para el mensaje "resultado de tu
+// solicitud para el día X" — antes faltaba este dato.
 func (r *ProgramacionRepository) ListarDecisionesSinNotificar(ctx context.Context, programacionID int) ([]models.ProgramacionItem, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT pi.id, pi.programacion_id, pi.vehiculo_id,
@@ -266,8 +269,10 @@ func (r *ProgramacionRepository) ListarDecisionesSinNotificar(ctx context.Contex
 		       pi.es_vacaciones, pi.programado, pi.orden,
 		       pi.motivo, pi.origen, pi.solicitante_nombre, pi.solicitante_email,
 		       TO_CHAR(pi.hora_solicitada, 'HH24:MI') AS hora_solicitada, pi.punto_encuentro,
-		       pi.estado_solicitud, pi.motivo_rechazo
+		       pi.estado_solicitud, pi.motivo_rechazo,
+		       TO_CHAR(p.fecha, 'YYYY-MM-DD') AS fecha_programacion
 		FROM programacion_items pi
+		JOIN programaciones_vehiculos p ON p.id = pi.programacion_id
 		LEFT JOIN vehiculos v ON v.id = pi.vehiculo_id
 		WHERE pi.programacion_id = $1
 		  AND pi.origen = 'solicitud'
@@ -283,6 +288,7 @@ func (r *ProgramacionRepository) ListarDecisionesSinNotificar(ctx context.Contex
 	for rows.Next() {
 		var item models.ProgramacionItem
 		var horaSolicitada sql.NullString
+		var fechaProgramacion string
 		if err := rows.Scan(
 			&item.ID, &item.ProgramacionID, &item.VehiculoID, &item.VehiculoPlaca,
 			&item.Conductor, &item.Dependencia, &item.Destino,
@@ -290,13 +296,14 @@ func (r *ProgramacionRepository) ListarDecisionesSinNotificar(ctx context.Contex
 			&item.EsVacaciones, &item.Programado, &item.Orden,
 			&item.Motivo, &item.Origen, &item.SolicitanteNombre, &item.SolicitanteEmail,
 			&horaSolicitada, &item.PuntoEncuentro,
-			&item.EstadoSolicitud, &item.MotivoRechazo,
+			&item.EstadoSolicitud, &item.MotivoRechazo, &fechaProgramacion,
 		); err != nil {
 			return nil, err
 		}
 		if horaSolicitada.Valid {
 			item.HoraSolicitada = &horaSolicitada.String
 		}
+		item.FechaProgramacion = fechaProgramacion
 		items = append(items, item)
 	}
 	return items, nil
