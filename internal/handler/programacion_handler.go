@@ -134,10 +134,15 @@ func NewProgramacionHandler(svc *service.ProgramacionService, usuarioRepo *repos
 	return &ProgramacionHandler{svc: svc, usuarioRepo: usuarioRepo}
 }
 
-// GET /api/v1/programaciones
+// GET /api/v1/programaciones?anio=2026&mes=9
+// Si no se envían anio/mes, devuelve todo el histórico (comportamiento
+// anterior) — el frontend siempre debería enviarlos desde que existe la
+// vista de calendario, para no cargar cientos de registros de una vez.
 func (h *ProgramacionHandler) Listar(c *gin.Context) {
 	orgID := middleware.OrganizationID(c)
-	lista, err := h.svc.Listar(c.Request.Context(), orgID)
+	anio, _ := strconv.Atoi(c.Query("anio"))
+	mes, _ := strconv.Atoi(c.Query("mes"))
+	lista, err := h.svc.Listar(c.Request.Context(), orgID, anio, mes)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, err.Error())
 		return
@@ -354,20 +359,48 @@ func (h *ProgramacionHandler) SolicitarVehiculo(c *gin.Context) {
 	})
 }
 
-// GET /api/v1/solicitudes-vehiculo/mias
+// GET /api/v1/solicitudes-vehiculo/mias?estado=&anio=&mes=&page=&page_size=
 // Lista las solicitudes hechas por el usuario autenticado, para que pueda
 // ver el estado (pendiente de asignar / ya confirmada con conductor y
-// vehículo).
+// vehículo). Soporta filtro por estado, por mes/año y paginación — un
+// solicitante frecuente puede acumular decenas de registros.
 func (h *ProgramacionHandler) MisSolicitudes(c *gin.Context) {
 	orgID := middleware.OrganizationID(c)
 	email := middleware.Email(c)
 
-	items, err := h.svc.MisSolicitudes(c.Request.Context(), orgID, email)
+	anio, _ := strconv.Atoi(c.Query("anio"))
+	mes, _ := strconv.Atoi(c.Query("mes"))
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+
+	filtros := repository.FiltrosMisSolicitudes{
+		Estado:   c.Query("estado"),
+		Anio:     anio,
+		Mes:      mes,
+		Page:     page,
+		PageSize: pageSize,
+	}
+
+	items, total, err := h.svc.MisSolicitudes(c.Request.Context(), orgID, email, filtros)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	response.Success(c, http.StatusOK, items)
+	pageSizeFinal := filtros.PageSize
+	if pageSizeFinal < 1 {
+		pageSizeFinal = 20
+	}
+	pageFinal := filtros.Page
+	if pageFinal < 1 {
+		pageFinal = 1
+	}
+	totalPages := (total + pageSizeFinal - 1) / pageSizeFinal
+	response.SuccessWithMeta(c, http.StatusOK, items, response.Meta{
+		Page:       pageFinal,
+		PageSize:   pageSizeFinal,
+		TotalItems: int64(total),
+		TotalPages: totalPages,
+	})
 }
 
 // PUT /api/v1/programaciones/items/:itemId/aprobar

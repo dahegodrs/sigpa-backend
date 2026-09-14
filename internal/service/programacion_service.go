@@ -60,8 +60,8 @@ func NewProgramacionService(repo *repository.ProgramacionRepository, plantillaRe
 	return &ProgramacionService{repo: repo, plantillaRepo: plantillaRepo, notificador: notificador}
 }
 
-func (s *ProgramacionService) Listar(ctx context.Context, organizationID int) ([]models.Programacion, error) {
-	return s.repo.Listar(ctx, organizationID)
+func (s *ProgramacionService) Listar(ctx context.Context, organizationID, anio, mes int) ([]models.Programacion, error) {
+	return s.repo.Listar(ctx, organizationID, anio, mes)
 }
 
 func (s *ProgramacionService) Obtener(ctx context.Context, organizationID, id int) (*models.Programacion, error) {
@@ -314,7 +314,8 @@ func (s *ProgramacionService) SolicitarVehiculo(ctx context.Context, organizatio
 }
 
 // MisSolicitudes lista las solicitudes hechas por un correo específico —
-// alimenta la pantalla "Mis solicitudes" del rol Solicitante.
-func (s *ProgramacionService) MisSolicitudes(ctx context.Context, organizationID int, email string) ([]models.ProgramacionItem, error) {
-	return s.repo.ListarSolicitudesPorEmail(ctx, organizationID, email)
+// alimenta la pantalla "Mis solicitudes" del rol Solicitante, con filtros
+// de estado/mes y paginación para no cargar decenas de registros de golpe.
+func (s *ProgramacionService) MisSolicitudes(ctx context.Context, organizationID int, email string, f repository.FiltrosMisSolicitudes) ([]models.ProgramacionItem, int, error) {
+	return s.repo.ListarSolicitudesPorEmail(ctx, organizationID, email, f)
 }

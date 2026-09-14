@@ -31,6 +31,11 @@ type Programacion struct {
 	// las filas sin marcar (borradores) no cuentan aunque existan en la BD.
 	TotalItems       int `json:"total_items" db:"total_items"`
 	TotalProgramados int `json:"total_programados" db:"total_programados"`
+	// TienePendientes indica si el día tiene al menos una fila de
+	// solicitud (origen='solicitud') sin resolver todavía — el frontend
+	// lo usa para resaltar en rojo los días que requieren atención del
+	// Administrador en la vista de calendario/listado.
+	TienePendientes bool `json:"tiene_pendientes" db:"tiene_pendientes"`
 	// Items se rellena solo en el GET de detalle, no en el listado.
 	Items []ProgramacionItem `json:"items,omitempty"`
 }

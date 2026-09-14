@@ -17,28 +17,43 @@ func NewProgramacionRepository(db *sql.DB) *ProgramacionRepository {
 	return &ProgramacionRepository{db: db}
 }
 
-// Listar devuelve las cabeceras de programación de una organización (sin items),
-// ordenadas por fecha descendente.
-func (r *ProgramacionRepository) Listar(ctx context.Context, organizationID int) ([]models.Programacion, error) {
-	rows, err := r.db.QueryContext(ctx, `
+// Listar devuelve las cabeceras de programación de una organización (sin
+// items), ordenadas por fecha descendente. Si anio y mes son > 0, filtra
+// solo las programaciones de ese mes — usado por la vista de calendario
+// del frontend para no tener que traer todo el histórico de una vez.
+// TienePendientes indica si el día tiene al menos una fila de solicitud
+// sin resolver (origen='solicitud' y estado_solicitud='pendiente'), lo
+// que el frontend usa para resaltar en rojo los días que requieren
+// atención del Administrador.
+func (r *ProgramacionRepository) Listar(ctx context.Context, organizationID, anio, mes int) ([]models.Programacion, error) {
+	query := `
 		SELECT p.id, p.organization_id, TO_CHAR(p.fecha, 'YYYY-MM-DD') AS fecha,
 		       p.observaciones, p.creado_por,
 		       COALESCE(u.nombre, '') AS creado_por_nombre,
 		       p.fecha_creacion, p.fecha_actualizacion,
 		       COALESCE(pi.total_items, 0) AS total_items,
-		       COALESCE(pi.total_programados, 0) AS total_programados
+		       COALESCE(pi.total_programados, 0) AS total_programados,
+		       COALESCE(pi.tiene_pendientes, FALSE) AS tiene_pendientes
 		FROM programaciones_vehiculos p
 		LEFT JOIN usuarios u ON u.id = p.creado_por
 		LEFT JOIN (
 		  SELECT programacion_id,
 		         COUNT(*) AS total_items,
-		         COUNT(*) FILTER (WHERE programado = TRUE) AS total_programados
+		         COUNT(*) FILTER (WHERE programado = TRUE) AS total_programados,
+		         BOOL_OR(origen = 'solicitud' AND estado_solicitud = 'pendiente') AS tiene_pendientes
 		  FROM programacion_items
 		  GROUP BY programacion_id
 		) pi ON pi.programacion_id = p.id
 		WHERE p.organization_id = $1
-		ORDER BY p.fecha DESC
-	`, organizationID)
+	`
+	args := []interface{}{organizationID}
+	if anio > 0 && mes > 0 {
+		query += " AND EXTRACT(YEAR FROM p.fecha) = $2 AND EXTRACT(MONTH FROM p.fecha) = $3"
+		args = append(args, anio, mes)
+	}
+	query += " ORDER BY p.fecha DESC"
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("error al listar programaciones: %w", err)
 	}
@@ -49,7 +64,7 @@ func (r *ProgramacionRepository) Listar(ctx context.Context, organizationID int)
 		var p models.Programacion
 		if err := rows.Scan(&p.ID, &p.OrganizationID, &p.Fecha, &p.Observaciones,
 			&p.CreadoPor, &p.CreadoPorNombre, &p.FechaCreacion, &p.FechaActualizacion,
-			&p.TotalItems, &p.TotalProgramados); err != nil {
+			&p.TotalItems, &p.TotalProgramados, &p.TienePendientes); err != nil {
 			return nil, err
 		}
 		lista = append(lista, p)
@@ -351,11 +366,62 @@ func (r *ProgramacionRepository) Desbloquear(ctx context.Context, itemID int) er
 	return nil
 }
 
-// ListarSolicitudesPorEmail devuelve todas las filas (de cualquier
-// programación) que fueron solicitadas por un correo específico —
-// alimenta la pantalla "Mis solicitudes" del rol Solicitante.
-func (r *ProgramacionRepository) ListarSolicitudesPorEmail(ctx context.Context, organizationID int, email string) ([]models.ProgramacionItem, error) {
-	rows, err := r.db.QueryContext(ctx, `
+// FiltrosMisSolicitudes agrupa los filtros opcionales de la pantalla "Mis
+// solicitudes": por estado (pendiente/aprobada/rechazada), por mes/año, y
+// paginación — necesarios porque un solicitante frecuente puede acumular
+// decenas de registros y listarlos todos de una vez volvería la pantalla
+// lenta e ilegible.
+type FiltrosMisSolicitudes struct {
+	Estado   string // "" = todas
+	Anio     int    // 0 = sin filtro
+	Mes      int    // 0 = sin filtro
+	Page     int    // 1-indexed
+	PageSize int
+}
+
+// ListarSolicitudesPorEmail devuelve las filas (de cualquier programación)
+// que fueron solicitadas por un correo específico — alimenta la pantalla
+// "Mis solicitudes" del rol Solicitante. Soporta filtro por estado, por
+// mes/año y paginación; devuelve también el total de registros que
+// cumplen el filtro (sin paginar) para que el frontend pueda calcular el
+// número de páginas.
+func (r *ProgramacionRepository) ListarSolicitudesPorEmail(ctx context.Context, organizationID int, email string, f FiltrosMisSolicitudes) ([]models.ProgramacionItem, int, error) {
+	conditions := []string{"p.organization_id = $1", "pi.solicitante_email = $2"}
+	args := []interface{}{organizationID, email}
+	argPos := 3
+
+	if f.Estado != "" {
+		conditions = append(conditions, fmt.Sprintf("pi.estado_solicitud = $%d", argPos))
+		args = append(args, f.Estado)
+		argPos++
+	}
+	if f.Anio > 0 && f.Mes > 0 {
+		conditions = append(conditions, fmt.Sprintf("EXTRACT(YEAR FROM p.fecha) = $%d AND EXTRACT(MONTH FROM p.fecha) = $%d", argPos, argPos+1))
+		args = append(args, f.Anio, f.Mes)
+		argPos += 2
+	}
+	whereClause := "WHERE " + fmt.Sprintf("%s", conditions[0])
+	for _, c := range conditions[1:] {
+		whereClause += " AND " + c
+	}
+
+	var total int
+	countQuery := "SELECT COUNT(*) FROM programacion_items pi JOIN programaciones_vehiculos p ON p.id = pi.programacion_id " + whereClause
+	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("error al contar solicitudes: %w", err)
+	}
+
+	page := f.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := f.PageSize
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	offset := (page - 1) * pageSize
+
+	query := fmt.Sprintf(`
 		SELECT pi.id, pi.programacion_id, pi.vehiculo_id,
 		       COALESCE(v.placa, '') AS vehiculo_placa,
 		       pi.conductor, pi.dependencia, pi.destino,
@@ -368,11 +434,15 @@ func (r *ProgramacionRepository) ListarSolicitudesPorEmail(ctx context.Context, 
 		FROM programacion_items pi
 		JOIN programaciones_vehiculos p ON p.id = pi.programacion_id
 		LEFT JOIN vehiculos v ON v.id = pi.vehiculo_id
-		WHERE p.organization_id = $1 AND pi.solicitante_email = $2
+		%s
 		ORDER BY p.fecha DESC, pi.id DESC
-	`, organizationID, email)
+		LIMIT $%d OFFSET $%d
+	`, whereClause, argPos, argPos+1)
+	args = append(args, pageSize, offset)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("error al listar solicitudes por email: %w", err)
+		return nil, 0, fmt.Errorf("error al listar solicitudes por email: %w", err)
 	}
 	defer rows.Close()
 
@@ -390,7 +460,7 @@ func (r *ProgramacionRepository) ListarSolicitudesPorEmail(ctx context.Context, 
 			&horaSolicitada, &item.PuntoEncuentro,
 			&item.EstadoSolicitud, &item.MotivoRechazo, &fechaProgramacion,
 		); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if horaSolicitada.Valid {
 			item.HoraSolicitada = &horaSolicitada.String
@@ -398,7 +468,7 @@ func (r *ProgramacionRepository) ListarSolicitudesPorEmail(ctx context.Context, 
 		item.FechaProgramacion = fechaProgramacion
 		items = append(items, item)
 	}
-	return items, nil
+	return items, total, nil
 }
 
 // Eliminar borra la cabecera (los items se borran por CASCADE).
