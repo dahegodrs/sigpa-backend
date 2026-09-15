@@ -48,6 +48,13 @@ func Setup(cfg *config.Config, corsOrigins []string, h Handlers) *gin.Engine {
 		public := api.Group("/public")
 		{
 			public.GET("/tema", h.Tema.ObtenerPorDominio)
+			// Config del cierre de sesión automático por inactividad — el
+			// frontend consulta este valor al iniciar sesión en vez de
+			// tenerlo hardcodeado, así el Administrador puede ajustarlo
+			// solo cambiando la variable de entorno SESSION_TIMEOUT_MINUTES.
+			public.GET("/session-timeout", func(c *gin.Context) {
+				c.JSON(200, gin.H{"success": true, "data": gin.H{"timeout_minutes": cfg.SessionTimeoutMinutes}})
+			})
 		}
 
 		// Login con credenciales locales (usuario + contraseña) — no requiere JWT

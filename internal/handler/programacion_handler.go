@@ -441,6 +441,14 @@ func (h *ProgramacionHandler) AprobarSolicitud(c *gin.Context) {
 			response.Error(c, http.StatusNotFound, "item no encontrado")
 			return
 		}
+		// Conflicto de horario: mismo vehículo o conductor ya programado
+		// en un horario que se solapa — se devuelve 409 con el mensaje
+		// descriptivo generado en el servicio, para que el frontend lo
+		// muestre tal cual al Administrador.
+		if errors.Is(err, apperrors.ErrConflicto) {
+			response.Error(c, http.StatusConflict, err.Error())
+			return
+		}
 		response.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}

@@ -4,10 +4,43 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
 
 	"github.com/alcaldia/sigpa-backend/internal/models"
 	"github.com/alcaldia/sigpa-backend/pkg/apperrors"
 )
+
+// horaRegex extrae la hora "HH:MM" al inicio de campos de texto libre como
+// "08:00 - Parque Principal" (hora_salida_punto) o "10:00" / "DISPONIBLE
+// PATIO" (hora_finalizacion). Se usa para poder comparar horarios aunque
+// estos campos no sean columnas TIME puras en la base de datos.
+var horaRegex = regexp.MustCompile(`^(\d{1,2}):(\d{2})`)
+
+// extraerMinutos convierte "08:30 - algo" en minutos desde medianoche
+// (510), para poder comparar rangos horarios numéricamente. Devuelve -1 si
+// el texto no tiene un formato de hora reconocible (ej. "DISPONIBLE
+// PATIO"), en cuyo caso el traslape nunca se considera aplicable para esa
+// fila.
+func extraerMinutos(texto string) int {
+	m := horaRegex.FindStringSubmatch(texto)
+	if m == nil {
+		return -1
+	}
+	var horas, minutos int
+	fmt.Sscanf(m[1], "%d", &horas)
+	fmt.Sscanf(m[2], "%d", &minutos)
+	return horas*60 + minutos
+}
+
+// rangosSeSolapan implementa la regla estándar de traslape de intervalos:
+// dos rangos [inicioA, finA) y [inicioB, finB) se solapan si
+// inicioA < finB Y inicioB < finA.
+func rangosSeSolapan(inicioA, finA, inicioB, finB int) bool {
+	if inicioA < 0 || finA < 0 || inicioB < 0 || finB < 0 {
+		return false
+	}
+	return inicioA < finB && inicioB < finA
+}
 
 type ProgramacionRepository struct {
 	db *sql.DB
@@ -248,6 +281,93 @@ func (r *ProgramacionRepository) AgregarItem(ctx context.Context, programacionID
 		return 0, fmt.Errorf("error al agregar item a la programación: %w", err)
 	}
 	return newID, nil
+}
+
+// ConflictoHorario describe un choque de horario detectado al intentar
+// aprobar una fila: qué recurso chocó (vehículo o conductor) y con qué
+// otra fila de la misma programación.
+type ConflictoHorario struct {
+	Recurso            string // "vehiculo" o "conductor"
+	ValorRecurso       string // placa o nombre del conductor
+	ActividadChocante  string
+	HoraInicioChocante string
+	HoraFinChocante    string
+}
+
+// BuscarConflictoHorario revisa las demás filas de la misma programación
+// (mismo día) que ya estén marcadas como programado=TRUE, y detecta si el
+// vehículo o el conductor de la fila que se va a aprobar ya están
+// ocupados en un horario que se solapa. excluirItemID se usa para no
+// comparar la fila contra sí misma. Devuelve nil si no hay conflicto.
+func (r *ProgramacionRepository) BuscarConflictoHorario(ctx context.Context, programacionID int, vehiculoID *int, conductor string, horaSalidaPunto, horaFinalizacion string, excluirItemID int) (*ConflictoHorario, error) {
+	inicioNueva := extraerMinutos(horaSalidaPunto)
+	finNueva := extraerMinutos(horaFinalizacion)
+	// Si la fila que se aprueba no tiene un horario reconocible, no hay
+	// forma de detectar traslape — se deja pasar (comportamiento anterior).
+	if inicioNueva < 0 || finNueva < 0 {
+		return nil, nil
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT pi.vehiculo_id, COALESCE(v.placa, ''), pi.conductor, pi.hora_salida_punto, pi.hora_finalizacion, pi.actividad
+		FROM programacion_items pi
+		LEFT JOIN vehiculos v ON v.id = pi.vehiculo_id
+		WHERE pi.programacion_id = $1 AND pi.id != $2 AND pi.programado = TRUE
+	`, programacionID, excluirItemID)
+	if err != nil {
+		return nil, fmt.Errorf("error al buscar conflictos de horario: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var otroVehiculoID sql.NullInt64
+		var otraPlaca, otroConductor, otraHoraInicio, otraHoraFin, otraActividad string
+		if err := rows.Scan(&otroVehiculoID, &otraPlaca, &otroConductor, &otraHoraInicio, &otraHoraFin, &otraActividad); err != nil {
+			return nil, err
+		}
+
+		inicioOtra := extraerMinutos(otraHoraInicio)
+		finOtra := extraerMinutos(otraHoraFin)
+		if !rangosSeSolapan(inicioNueva, finNueva, inicioOtra, finOtra) {
+			continue
+		}
+
+		// Mismo vehículo en horario solapado.
+		if vehiculoID != nil && otroVehiculoID.Valid && int(otroVehiculoID.Int64) == *vehiculoID {
+			return &ConflictoHorario{
+				Recurso: "vehiculo", ValorRecurso: otraPlaca,
+				ActividadChocante: otraActividad, HoraInicioChocante: otraHoraInicio, HoraFinChocante: otraHoraFin,
+			}, nil
+		}
+		// Mismo conductor en horario solapado (comparación case-insensitive
+		// simple, ya que el conductor viene de una lista configurable con
+		// nombres consistentes).
+		if conductor != "" && conductor != "DISPONIBLE PATIO" && otroConductor == conductor {
+			return &ConflictoHorario{
+				Recurso: "conductor", ValorRecurso: otroConductor,
+				ActividadChocante: otraActividad, HoraInicioChocante: otraHoraInicio, HoraFinChocante: otraHoraFin,
+			}, nil
+		}
+	}
+	return nil, nil
+}
+
+// ObtenerItem devuelve una sola fila por su ID — usado para leer los
+// datos actuales (vehículo, conductor, horario) antes de validar
+// conflictos al aprobar.
+func (r *ProgramacionRepository) ObtenerItem(ctx context.Context, itemID int) (*models.ProgramacionItem, error) {
+	var item models.ProgramacionItem
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, programacion_id, vehiculo_id, conductor, hora_salida_punto, hora_finalizacion
+		FROM programacion_items WHERE id = $1
+	`, itemID).Scan(&item.ID, &item.ProgramacionID, &item.VehiculoID, &item.Conductor, &item.HoraSalidaPunto, &item.HoraFinalizacion)
+	if err == sql.ErrNoRows {
+		return nil, apperrors.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("error al obtener item: %w", err)
+	}
+	return &item, nil
 }
 
 // ActualizarEstadoItem aprueba o rechaza UNA fila de solicitud puntual sin

@@ -129,7 +129,32 @@ func (s *ProgramacionService) DesbloquearItem(ctx context.Context, itemID int) e
 
 // AprobarItem marca una fila de solicitud como aprobada (el director ya
 // asignó vehículo/conductor y confirmó el servicio).
+// AprobarItem marca una solicitud como aprobada, pero antes valida que el
+// vehículo o el conductor asignados no choquen de horario con otra fila ya
+// programada del mismo día — evita, por ejemplo, aprobar dos servicios
+// simultáneos para la misma placa BXL94C entre 8:00 y 10:00.
 func (s *ProgramacionService) AprobarItem(ctx context.Context, itemID int) error {
+	item, err := s.repo.ObtenerItem(ctx, itemID)
+	if err != nil {
+		return err
+	}
+
+	conflicto, err := s.repo.BuscarConflictoHorario(ctx, item.ProgramacionID, item.VehiculoID, item.Conductor, item.HoraSalidaPunto, item.HoraFinalizacion, itemID)
+	if err != nil {
+		return err
+	}
+	if conflicto != nil {
+		var mensaje string
+		if conflicto.Recurso == "vehiculo" {
+			mensaje = fmt.Sprintf("Ya existe el vehículo %s programado de %s a %s (%s) — no se puede aprobar esta solicitud en el mismo horario.",
+				conflicto.ValorRecurso, conflicto.HoraInicioChocante, conflicto.HoraFinChocante, conflicto.ActividadChocante)
+		} else {
+			mensaje = fmt.Sprintf("El conductor %s ya está programado de %s a %s (%s) — no se puede aprobar esta solicitud en el mismo horario.",
+				conflicto.ValorRecurso, conflicto.HoraInicioChocante, conflicto.HoraFinChocante, conflicto.ActividadChocante)
+		}
+		return apperrors.NewConflictoError(mensaje)
+	}
+
 	return s.repo.ActualizarEstadoItem(ctx, itemID, "aprobada", nil)
 }
 

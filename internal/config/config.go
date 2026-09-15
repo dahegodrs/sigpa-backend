@@ -3,6 +3,7 @@ package config
 import (
 	"log"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/joho/godotenv"
@@ -59,6 +60,12 @@ type Config struct {
 	AlertasCronSpec string // expresión cron para el job diario de vencimientos
 
 	CORSAllowedOrigins []string
+
+	// SessionTimeoutMinutes controla el cierre de sesión automático por
+	// inactividad en el frontend — se expone vía endpoint público para que
+	// el frontend no tenga el valor hardcodeado, y el Administrador pueda
+	// cambiarlo solo modificando la variable de entorno en el despliegue.
+	SessionTimeoutMinutes int
 }
 
 // Load lee el archivo .env (si existe) y las variables de entorno del sistema.
@@ -103,12 +110,23 @@ func Load() *Config {
 		AlertasCronSpec: getEnv("ALERTAS_CRON_SPEC", "0 6 * * *"), // 6:00 AM todos los días
 
 		CORSAllowedOrigins: strings.Split(getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000"), ","),
+
+		SessionTimeoutMinutes: getEnvInt("SESSION_TIMEOUT_MINUTES", 5),
 	}
 }
 
 func getEnv(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok && value != "" {
 		return value
+	}
+	return fallback
+}
+
+func getEnvInt(key string, fallback int) int {
+	if value, ok := os.LookupEnv(key); ok && value != "" {
+		if n, err := strconv.Atoi(value); err == nil {
+			return n
+		}
 	}
 	return fallback
 }
