@@ -236,14 +236,14 @@ func (r *ProgramacionRepository) AgregarItem(ctx context.Context, programacionID
 		  (programacion_id, vehiculo_id, conductor, dependencia, destino,
 		   hora_salida_punto, hora_finalizacion, actividad, es_vacaciones, programado, orden,
 		   motivo, origen, solicitante_nombre, solicitante_email, hora_solicitada, punto_encuentro,
-		   estado_solicitud)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+		   estado_solicitud, tipo_vehiculo_solicitado_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		RETURNING id
 	`, programacionID, item.VehiculoID, item.Conductor, item.Dependencia,
 		item.Destino, item.HoraSalidaPunto, item.HoraFinalizacion, item.Actividad,
 		item.EsVacaciones, item.Programado, siguienteOrden,
 		item.Motivo, origen, item.SolicitanteNombre, item.SolicitanteEmail,
-		item.HoraSolicitada, item.PuntoEncuentro, estadoSolicitud).Scan(&newID)
+		item.HoraSolicitada, item.PuntoEncuentro, estadoSolicitud, item.TipoVehiculoSolicitadoID).Scan(&newID)
 	if err != nil {
 		return 0, fmt.Errorf("error al agregar item a la programación: %w", err)
 	}
@@ -497,9 +497,11 @@ func (r *ProgramacionRepository) listarItems(ctx context.Context, programacionID
 		       pi.es_vacaciones, pi.programado, pi.orden,
 		       pi.motivo, pi.origen, pi.solicitante_nombre, pi.solicitante_email,
 		       TO_CHAR(pi.hora_solicitada, 'HH24:MI') AS hora_solicitada, pi.punto_encuentro,
-		       pi.estado_solicitud, pi.motivo_rechazo
+		       pi.estado_solicitud, pi.motivo_rechazo,
+		       pi.tipo_vehiculo_solicitado_id, COALESCE(tv.nombre, '') AS tipo_vehiculo_solicitado_nombre
 		FROM programacion_items pi
 		LEFT JOIN vehiculos v ON v.id = pi.vehiculo_id
+		LEFT JOIN tipos_vehiculo tv ON tv.id = pi.tipo_vehiculo_solicitado_id
 		WHERE pi.programacion_id = $1
 		ORDER BY pi.orden ASC, pi.id ASC
 	`, programacionID)
@@ -520,6 +522,7 @@ func (r *ProgramacionRepository) listarItems(ctx context.Context, programacionID
 			&item.Motivo, &item.Origen, &item.SolicitanteNombre, &item.SolicitanteEmail,
 			&horaSolicitada, &item.PuntoEncuentro,
 			&item.EstadoSolicitud, &item.MotivoRechazo,
+			&item.TipoVehiculoSolicitadoID, &item.TipoVehiculoSolicitadoNombre,
 		); err != nil {
 			return nil, err
 		}
@@ -546,13 +549,14 @@ func insertarItems(ctx context.Context, tx *sql.Tx, programacionID int, items []
 			  (programacion_id, vehiculo_id, conductor, dependencia, destino,
 			   hora_salida_punto, hora_finalizacion, actividad, es_vacaciones, programado, orden,
 			   motivo, origen, solicitante_nombre, solicitante_email, hora_solicitada, punto_encuentro,
-			   estado_solicitud, motivo_rechazo)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+			   estado_solicitud, motivo_rechazo, tipo_vehiculo_solicitado_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 		`, programacionID, item.VehiculoID, item.Conductor, item.Dependencia,
 			item.Destino, item.HoraSalidaPunto, item.HoraFinalizacion, item.Actividad,
 			item.EsVacaciones, item.Programado, i,
 			item.Motivo, origen, item.SolicitanteNombre, item.SolicitanteEmail,
-			item.HoraSolicitada, item.PuntoEncuentro, estadoSolicitud, item.MotivoRechazo)
+			item.HoraSolicitada, item.PuntoEncuentro, estadoSolicitud, item.MotivoRechazo,
+			item.TipoVehiculoSolicitadoID)
 		if err != nil {
 			return fmt.Errorf("error al insertar item %d: %w", i, err)
 		}

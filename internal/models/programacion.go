@@ -75,6 +75,14 @@ type ProgramacionItem struct {
 	// con la cabecera), para que "Mis solicitudes" pueda mostrar en qué
 	// fecha quedó registrado el servicio sin tener que hacer otra consulta.
 	FechaProgramacion string `json:"fecha_programacion,omitempty" db:"-"`
+	// TipoVehiculoSolicitadoID/Nombre: el TIPO de vehículo que el
+	// solicitante pidió (ej. "Camioneta"), distinto del vehículo real que
+	// finalmente se asigna — en el momento de solicitar todavía no existe
+	// un vehículo concreto, solo una categoría deseada. Se usa como
+	// referencia visual para el director al momento de asignar un
+	// vehículo real en "Editar Programación".
+	TipoVehiculoSolicitadoID     *int   `json:"tipo_vehiculo_solicitado_id,omitempty" db:"tipo_vehiculo_solicitado_id"`
+	TipoVehiculoSolicitadoNombre string `json:"tipo_vehiculo_solicitado_nombre,omitempty" db:"tipo_vehiculo_solicitado_nombre"`
 
 	// ── Estado explícito de la solicitud (timeline tipo pasarela) ──────────
 	// EstadoSolicitud es independiente de Programado: permite que el

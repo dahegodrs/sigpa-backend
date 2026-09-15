@@ -126,12 +126,13 @@ func (h *ListaHandler) Eliminar(c *gin.Context) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type ProgramacionHandler struct {
-	svc         *service.ProgramacionService
-	usuarioRepo *repository.UsuarioRepository
+	svc             *service.ProgramacionService
+	usuarioRepo     *repository.UsuarioRepository
+	dependenciaRepo *repository.DependenciaRepository
 }
 
-func NewProgramacionHandler(svc *service.ProgramacionService, usuarioRepo *repository.UsuarioRepository) *ProgramacionHandler {
-	return &ProgramacionHandler{svc: svc, usuarioRepo: usuarioRepo}
+func NewProgramacionHandler(svc *service.ProgramacionService, usuarioRepo *repository.UsuarioRepository, dependenciaRepo *repository.DependenciaRepository) *ProgramacionHandler {
+	return &ProgramacionHandler{svc: svc, usuarioRepo: usuarioRepo, dependenciaRepo: dependenciaRepo}
 }
 
 // GET /api/v1/programaciones?anio=2026&mes=9
@@ -279,6 +280,12 @@ type solicitudVehiculoRequest struct {
 	Actividad        string `json:"actividad" binding:"required"`
 	Motivo           string `json:"motivo" binding:"required"`
 	Dependencia      string `json:"dependencia"`
+	// TipoVehiculoID es el tipo de vehículo que el solicitante necesita
+	// (ej. "Camioneta") — no un vehículo concreto, ya que en este punto
+	// todavía no se ha asignado ninguno. Opcional para no romper
+	// integraciones existentes, pero se recomienda siempre enviarlo desde
+	// el formulario.
+	TipoVehiculoID *int `json:"tipo_vehiculo_id"`
 }
 
 // POST /api/v1/solicitudes-vehiculo
@@ -291,12 +298,23 @@ func (h *ProgramacionHandler) SolicitarVehiculo(c *gin.Context) {
 	userID := middleware.UserID(c)
 	email := middleware.Email(c)
 
-	// El nombre del solicitante se toma del registro de usuario (no viene
-	// en el JWT) — se usa para mostrar "quién pidió el servicio" en la
-	// programación sin depender de que el formulario lo vuelva a pedir.
+	// El nombre del solicitante y su dependencia se toman del registro de
+	// usuario (no vienen en el JWT). La dependencia se resuelve
+	// automáticamente desde el perfil del usuario que hizo la solicitud —
+	// así la fila de la programación queda asociada a la dependencia real
+	// del solicitante en vez de un valor genérico, sin que el formulario
+	// tenga que volver a preguntarlo. Si el usuario no tiene dependencia
+	// asignada (o no se pudo resolver), se usa "DISPONIBLE PATIO" como
+	// respaldo para no bloquear la solicitud.
 	nombreUsuario := email
+	dependenciaUsuario := ""
 	if u, err := h.usuarioRepo.GetByID(c.Request.Context(), orgID, userID); err == nil {
 		nombreUsuario = u.Nombre
+		if u.DependenciaID != nil {
+			if dep, err := h.dependenciaRepo.GetByID(c.Request.Context(), orgID, *u.DependenciaID); err == nil {
+				dependenciaUsuario = dep.Nombre
+			}
+		}
 	}
 
 	var body solicitudVehiculoRequest
@@ -313,7 +331,10 @@ func (h *ProgramacionHandler) SolicitarVehiculo(c *gin.Context) {
 		return
 	}
 
-	dependencia := body.Dependencia
+	dependencia := dependenciaUsuario
+	if dependencia == "" {
+		dependencia = body.Dependencia
+	}
 	if dependencia == "" {
 		dependencia = "DISPONIBLE PATIO"
 	}
@@ -330,21 +351,22 @@ func (h *ProgramacionHandler) SolicitarVehiculo(c *gin.Context) {
 	emailSolicitante := email
 
 	item := &models.ProgramacionItem{
-		Conductor:         "DISPONIBLE PATIO",
-		VehiculoID:        nil,
-		Dependencia:       dependencia,
-		Destino:           body.Destino,
-		HoraSalidaPunto:   horaSalidaPunto,
-		HoraFinalizacion:  body.HoraFinalizacion,
-		Actividad:         body.Actividad,
-		EsVacaciones:      false,
-		Programado:        false,
-		Motivo:            &motivo,
-		Origen:            "solicitud",
-		SolicitanteNombre: &nombreSolicitante,
-		SolicitanteEmail:  &emailSolicitante,
-		HoraSolicitada:    &horaSolicitada,
-		PuntoEncuentro:    &puntoEncuentro,
+		Conductor:                "DISPONIBLE PATIO",
+		VehiculoID:               nil,
+		Dependencia:              dependencia,
+		Destino:                  body.Destino,
+		HoraSalidaPunto:          horaSalidaPunto,
+		HoraFinalizacion:         body.HoraFinalizacion,
+		Actividad:                body.Actividad,
+		EsVacaciones:             false,
+		Programado:               false,
+		Motivo:                   &motivo,
+		Origen:                   "solicitud",
+		SolicitanteNombre:        &nombreSolicitante,
+		SolicitanteEmail:         &emailSolicitante,
+		HoraSolicitada:           &horaSolicitada,
+		PuntoEncuentro:           &puntoEncuentro,
+		TipoVehiculoSolicitadoID: body.TipoVehiculoID,
 	}
 
 	programacionID, itemID, err := h.svc.SolicitarVehiculo(c.Request.Context(), orgID, userID, item, body.Fecha)
