@@ -71,7 +71,7 @@ func (r *DashboardRepository) ObtenerKPIs(ctx context.Context, organizationID in
 			SUM(CASE WHEN d.estado_documento = 'Vencido' THEN 1 ELSE 0 END) AS vencidos
 		FROM documentos d
 		INNER JOIN tipos_documento td ON td.id = d.tipo_documento_id
-		WHERE d.organization_id = $1 AND d.vigente_actual = TRUE
+		WHERE d.organization_id = $1 AND d.vigente_actual = TRUE AND d.eliminado = FALSE
 			AND td.nombre IN ('SOAT', 'Tecnomecánica', 'Póliza de seguros')
 		GROUP BY td.nombre
 	`
@@ -149,7 +149,7 @@ func (r *DashboardRepository) VencimientosPorMes(ctx context.Context, organizati
 	return r.conteoGenerico(ctx, `
 		SELECT TO_CHAR(d.fecha_vencimiento, 'YYYY-MM'), COUNT(*)
 		FROM documentos d
-		WHERE d.organization_id = $1 AND d.vigente_actual = TRUE
+		WHERE d.organization_id = $1 AND d.vigente_actual = TRUE AND d.eliminado = FALSE
 			AND d.fecha_vencimiento BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '12 months')
 		GROUP BY TO_CHAR(d.fecha_vencimiento, 'YYYY-MM')
 		ORDER BY TO_CHAR(d.fecha_vencimiento, 'YYYY-MM')
@@ -176,7 +176,7 @@ func (r *DashboardRepository) VencimientosPorMesPorTipo(ctx context.Context, org
 			SUM(CASE WHEN td.nombre = 'Póliza de seguros' THEN 1 ELSE 0 END) AS poliza
 		FROM documentos d
 		INNER JOIN tipos_documento td ON td.id = d.tipo_documento_id
-		WHERE d.organization_id = $1 AND d.vigente_actual = TRUE
+		WHERE d.organization_id = $1 AND d.vigente_actual = TRUE AND d.eliminado = FALSE
 			AND d.fecha_vencimiento BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '12 months')
 		GROUP BY TO_CHAR(d.fecha_vencimiento, 'YYYY-MM')
 		ORDER BY TO_CHAR(d.fecha_vencimiento, 'YYYY-MM')
