@@ -106,6 +106,33 @@ func (h *AlertaHandler) ListarConfig(c *gin.Context) {
 	response.Success(c, http.StatusOK, config)
 }
 
+type plantillaAlertaRequest struct {
+	Asunto     string `json:"asunto" binding:"required"`
+	CuerpoHTML string `json:"cuerpo_html" binding:"required"`
+}
+
+// GET /api/v1/plantillas-correo/alerta-documental
+func (h *AlertaHandler) ObtenerPlantillaAlertaDocumental(c *gin.Context) {
+	orgID := middleware.OrganizationID(c)
+	asunto, cuerpo := h.service.ObtenerPlantillaAlertaDocumental(c.Request.Context(), orgID)
+	response.Success(c, http.StatusOK, gin.H{"asunto": asunto, "cuerpo_html": cuerpo})
+}
+
+// PUT /api/v1/plantillas-correo/alerta-documental
+func (h *AlertaHandler) GuardarPlantillaAlertaDocumental(c *gin.Context) {
+	orgID := middleware.OrganizationID(c)
+	var body plantillaAlertaRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		response.Error(c, http.StatusBadRequest, "asunto y cuerpo son requeridos")
+		return
+	}
+	if err := h.service.GuardarPlantillaAlertaDocumental(c.Request.Context(), orgID, body.Asunto, body.CuerpoHTML); err != nil {
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.Success(c, http.StatusOK, gin.H{"guardado": true})
+}
+
 type configAlertaRequest struct {
 	DiasAntes int    `json:"dias_antes" binding:"gte=0"`
 	Nivel     string `json:"nivel" binding:"required"`

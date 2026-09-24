@@ -175,14 +175,18 @@ func Setup(cfg *config.Config, corsOrigins []string, h Handlers) *gin.Engine {
 					middleware.RequireRoles("Administrador", "Dependencia"), h.Programacion.DesbloquearSolicitud)
 			}
 
-			// Plantilla configurable del correo de notificación a
-			// solicitantes (aprobación/rechazo), editable desde el Centro
-			// de Programación.
+			// Plantillas configurables de correo:
+			// - solicitud-vehiculo: notificación a solicitantes
+			// - alerta-documental: alertas automáticas de vencimientos
 			plantillasCorreo := protected.Group("/plantillas-correo")
 			{
 				plantillasCorreo.GET("/solicitud-vehiculo", h.Programacion.ObtenerPlantillaSolicitud)
 				plantillasCorreo.PUT("/solicitud-vehiculo",
 					middleware.RequireRoles("Administrador"), h.Programacion.GuardarPlantillaSolicitud)
+
+				plantillasCorreo.GET("/alerta-documental", h.Alerta.ObtenerPlantillaAlertaDocumental)
+				plantillasCorreo.PUT("/alerta-documental",
+					middleware.RequireRoles("Administrador"), h.Alerta.GuardarPlantillaAlertaDocumental)
 			}
 
 			// Solicitud de vehículo (formulario que reemplaza el correo

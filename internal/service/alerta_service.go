@@ -18,7 +18,7 @@ type NotificadorEmail interface {
 	EnviarCorreo(ctx context.Context, destinatario, asunto, cuerpoHTML string) error
 }
 
-const asuntoPorDefectoAlertaDocumental = "SIGPA — {{tipo_documento}} próximo a vencer ({{placa}})"
+const asuntoPorDefectoAlertaDocumental = "SIGPA | Alerta documental {{estado_alerta}} — {{tipo_documento}} vehículo {{placa}}"
 const plantillaPorDefectoAlertaDocumental = `Cordial saludo,
 
 Por medio del presente correo, desde el área de Patio y Parque Automotor de la Alcaldía de Funza se hace el recordatorio formal de que el documento {{tipo_documento}} del vehículo con placa {{placa}}, asignado a {{dependencia}}, se encuentra {{estado_alerta_texto}} con fecha de vencimiento el {{fecha_vencimiento}}.
@@ -271,6 +271,33 @@ func (s *AlertaService) obtenerNombreDependencia(ctx context.Context, organizati
 		return "", err
 	}
 	return dep.Nombre, nil
+}
+
+func (s *AlertaService) ObtenerPlantillaAlertaDocumental(ctx context.Context, organizationID int) (string, string) {
+	asunto := asuntoPorDefectoAlertaDocumental
+	cuerpo := plantillaPorDefectoAlertaDocumental
+
+	if s.plantillaRepo == nil {
+		return asunto, cuerpo
+	}
+	p, err := s.plantillaRepo.ObtenerPorTipo(ctx, organizationID, "alerta_documental")
+	if err != nil {
+		return asunto, cuerpo
+	}
+	if strings.TrimSpace(p.Asunto) != "" {
+		asunto = p.Asunto
+	}
+	if strings.TrimSpace(p.CuerpoHTML) != "" {
+		cuerpo = p.CuerpoHTML
+	}
+	return asunto, cuerpo
+}
+
+func (s *AlertaService) GuardarPlantillaAlertaDocumental(ctx context.Context, organizationID int, asunto, cuerpo string) error {
+	if s.plantillaRepo == nil {
+		return fmt.Errorf("repositorio de plantilla no configurado")
+	}
+	return s.plantillaRepo.GuardarOActualizar(ctx, organizationID, "alerta_documental", asunto, cuerpo)
 }
 
 func (s *AlertaService) ListarPorOrganizacion(ctx context.Context, organizationID int, soloPendientes bool) ([]models.Alerta, error) {
