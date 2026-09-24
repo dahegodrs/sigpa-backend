@@ -300,6 +300,10 @@ func (s *AlertaService) GuardarPlantillaAlertaDocumental(ctx context.Context, or
 	return s.plantillaRepo.GuardarOActualizar(ctx, organizationID, "alerta_documental", asunto, cuerpo)
 }
 
+func (s *AlertaService) ObtenerCoberturaHoy(ctx context.Context, organizationID int) (*models.CoberturaAlertas, error) {
+	return s.alertaRepo.ObtenerCoberturaHoy(ctx, organizationID)
+}
+
 func (s *AlertaService) ListarPorOrganizacion(ctx context.Context, organizationID int, soloPendientes bool) ([]models.Alerta, error) {
 	return s.alertaRepo.ListarPorOrganizacion(ctx, organizationID, soloPendientes)
 }

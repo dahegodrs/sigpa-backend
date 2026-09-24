@@ -37,6 +37,13 @@ type ConfigAlerta struct {
 	Activo         bool   `json:"activo" db:"activo"`
 }
 
+type CoberturaAlertas struct {
+	ProximosTotal                  int `json:"proximos_total"`
+	CoincidenUmbralHoy             int `json:"coinciden_umbral_hoy"`
+	AlertasGeneradasHoy            int `json:"alertas_generadas_hoy"`
+	DocumentosProximosSinAlertaHoy int `json:"documentos_proximos_sin_alerta_hoy"`
+}
+
 // HistorialCambio registra la trazabilidad de cualquier entidad del sistema.
 type HistorialCambio struct {
 	ID              int64     `json:"id" db:"id"`

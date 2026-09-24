@@ -95,6 +95,18 @@ func (h *AlertaHandler) MarcarTodasLeidas(c *gin.Context) {
 	response.Success(c, http.StatusOK, gin.H{"actualizado": true})
 }
 
+// GET /api/v1/alertas/cobertura
+func (h *AlertaHandler) CoberturaHoy(c *gin.Context) {
+	orgID := middleware.OrganizationID(c)
+
+	data, err := h.service.ObtenerCoberturaHoy(c.Request.Context(), orgID)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.Success(c, http.StatusOK, data)
+}
+
 // GET /api/v1/alertas/config
 func (h *AlertaHandler) ListarConfig(c *gin.Context) {
 	orgID := middleware.OrganizationID(c)

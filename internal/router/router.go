@@ -126,6 +126,7 @@ func Setup(cfg *config.Config, corsOrigins []string, h Handlers) *gin.Engine {
 			alertas := protected.Group("/alertas")
 			{
 				alertas.GET("", h.Alerta.List)
+				alertas.GET("/cobertura", h.Alerta.CoberturaHoy)
 				alertas.POST("/ejecutar-revision",
 					middleware.RequireRoles("Administrador"), h.Alerta.EjecutarRevisionManual)
 				alertas.PUT("/marcar-todas-leidas", h.Alerta.MarcarTodasLeidas)

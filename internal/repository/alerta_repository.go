@@ -279,3 +279,62 @@ func (r *AlertaRepository) MarcarTodasLeidas(ctx context.Context, organizationID
 	}
 	return nil
 }
+
+// ObtenerCoberturaHoy resume la diferencia entre:
+//   - inventario documental próximo a vencer (estado_documento), y
+//   - eventos de alerta efectivamente generados hoy por reglas.
+//
+// Esto permite explicar operacionalmente por qué puede haber más documentos
+// "próximos" que alertas del día (solo coinciden los que caen en umbrales
+// configurados hoy: 45/30/15/7/1/0).
+func (r *AlertaRepository) ObtenerCoberturaHoy(ctx context.Context, organizationID int) (*models.CoberturaAlertas, error) {
+	const q = `
+WITH reglas AS (
+	SELECT dias_antes
+	FROM config_alertas
+	WHERE organization_id = $1 AND activo = TRUE
+),
+proximos AS (
+	SELECT d.id, d.fecha_vencimiento::date AS fecha_venc
+	FROM documentos d
+	WHERE d.organization_id = $1
+	  AND d.eliminado = FALSE
+	  AND d.estado_documento = 'ProximoAVencer'
+	  AND d.fecha_vencimiento IS NOT NULL
+),
+coinciden_hoy AS (
+	SELECT p.id
+	FROM proximos p
+	JOIN reglas r ON (p.fecha_venc - CURRENT_DATE) = r.dias_antes
+),
+alertados_hoy AS (
+	SELECT DISTINCT a.documento_id
+	FROM alertas a
+	WHERE a.organization_id = $1
+	  AND a.fecha_programada = CURRENT_DATE
+)
+SELECT
+	(SELECT COUNT(*) FROM proximos) AS proximos_total,
+	(SELECT COUNT(*) FROM coinciden_hoy) AS coinciden_umbral_hoy,
+	(SELECT COUNT(*) FROM alertados_hoy) AS alertas_generadas_hoy,
+	(
+		SELECT COUNT(*)
+		FROM proximos p
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM alertados_hoy ah
+			WHERE ah.documento_id = p.id
+		)
+	) AS documentos_proximos_sin_alerta_hoy
+`
+	var c models.CoberturaAlertas
+	if err := r.db.QueryRowContext(ctx, q, organizationID).Scan(
+		&c.ProximosTotal,
+		&c.CoincidenUmbralHoy,
+		&c.AlertasGeneradasHoy,
+		&c.DocumentosProximosSinAlertaHoy,
+	); err != nil {
+		return nil, fmt.Errorf("error al obtener cobertura de alertas: %w", err)
+	}
+	return &c, nil
+}
