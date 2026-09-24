@@ -168,6 +168,7 @@ func (r *DocumentoRepository) GetByID(ctx context.Context, organizationID, id in
 func (r *DocumentoRepository) ListarParaRevisionDiaria(ctx context.Context) ([]models.Documento, error) {
 	query := documentoSelectBase + `
 		WHERE d.vigente_actual = TRUE AND d.fecha_vencimiento IS NOT NULL AND d.eliminado = FALSE
+		  AND LOWER(TRIM(td.nombre)) <> 'tarjeta de propiedad'
 	`
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {

@@ -234,9 +234,12 @@ func (r *AlertaRepository) MarcarResultado(ctx context.Context, id int, exito bo
 func (r *AlertaRepository) ListarPorOrganizacion(ctx context.Context, organizationID int, soloPendientes bool) ([]models.Alerta, error) {
 	query := alertaSelectEnriquecido + " WHERE a.organization_id = $1"
 	if soloPendientes {
-		query += " AND a.estado_envio = 'Pendiente'"
+		// "Pendientes" para UI significa no leídas, no "estado_envio = Pendiente".
+		// Las alertas pasan a estado_envio='Enviada' inmediatamente después del job,
+		// por eso el popup y módulo quedaban vacíos aunque sí se hubieran generado.
+		query += " AND a.leida = FALSE"
 	}
-	query += " ORDER BY a.fecha_programada DESC"
+	query += " ORDER BY a.fecha_programada DESC, a.fecha_creacion DESC"
 
 	rows, err := r.db.QueryContext(ctx, query, organizationID)
 	if err != nil {
