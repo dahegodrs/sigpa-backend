@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/alcaldia/sigpa-backend/internal/models"
@@ -16,13 +18,32 @@ type NotificadorEmail interface {
 	EnviarCorreo(ctx context.Context, destinatario, asunto, cuerpoHTML string) error
 }
 
+const asuntoPorDefectoAlertaDocumental = "SIGPA — {{tipo_documento}} próximo a vencer ({{placa}})"
+const plantillaPorDefectoAlertaDocumental = `Cordial saludo,
+
+Por medio del presente correo, desde el área de Patio y Parque Automotor de la Alcaldía de Funza se hace el recordatorio formal de que el documento {{tipo_documento}} del vehículo con placa {{placa}}, asignado a {{dependencia}}, se encuentra {{estado_alerta_texto}} con fecha de vencimiento el {{fecha_vencimiento}}.
+
+El vencimiento está previsto {{dias_para_vencer_texto}}.
+
+Se solicita gestionar con carácter urgente la renovación de este documento para garantizar la legalidad y correcta operación del vehículo.
+
+Por favor confirmar la recepción de este mensaje y las acciones a tomar.
+
+Atentamente,
+
+Patio y Parque Automotor
+Alcaldía de Funza — Cundinamarca
+{{correo_contacto}}`
+
 type AlertaService struct {
-	alertaRepo    *repository.AlertaRepository
-	documentoRepo *repository.DocumentoRepository
-	documentoSvc  *DocumentoService
-	vehiculoRepo  *repository.VehiculoRepository
-	usuarioRepo   *repository.UsuarioRepository
-	notificador   NotificadorEmail
+	alertaRepo      *repository.AlertaRepository
+	documentoRepo   *repository.DocumentoRepository
+	documentoSvc    *DocumentoService
+	vehiculoRepo    *repository.VehiculoRepository
+	usuarioRepo     *repository.UsuarioRepository
+	plantillaRepo   *repository.PlantillaCorreoRepository
+	dependenciaRepo *repository.DependenciaRepository
+	notificador     NotificadorEmail
 }
 
 func NewAlertaService(
@@ -31,15 +52,19 @@ func NewAlertaService(
 	documentoSvc *DocumentoService,
 	vehiculoRepo *repository.VehiculoRepository,
 	usuarioRepo *repository.UsuarioRepository,
+	plantillaRepo *repository.PlantillaCorreoRepository,
+	dependenciaRepo *repository.DependenciaRepository,
 	notificador NotificadorEmail,
 ) *AlertaService {
 	return &AlertaService{
-		alertaRepo:    alertaRepo,
-		documentoRepo: documentoRepo,
-		documentoSvc:  documentoSvc,
-		vehiculoRepo:  vehiculoRepo,
-		usuarioRepo:   usuarioRepo,
-		notificador:   notificador,
+		alertaRepo:      alertaRepo,
+		documentoRepo:   documentoRepo,
+		documentoSvc:    documentoSvc,
+		vehiculoRepo:    vehiculoRepo,
+		usuarioRepo:     usuarioRepo,
+		plantillaRepo:   plantillaRepo,
+		dependenciaRepo: dependenciaRepo,
+		notificador:     notificador,
 	}
 }
 
@@ -169,8 +194,7 @@ func (s *AlertaService) EnviarPendientes(ctx context.Context) error {
 	}
 
 	for _, a := range pendientes {
-		asunto := "Alerta SIGPA: documento vehicular " + a.TipoAlerta
-		cuerpo := "Se ha generado una alerta de nivel " + a.TipoAlerta + " para el vehículo asociado. Ingrese a SIGPA para más detalles."
+		asunto, cuerpo := s.construirCorreoAlertaDocumental(ctx, a)
 
 		err := s.notificador.EnviarCorreo(ctx, a.Destinatario, asunto, cuerpo)
 		var detalleError *string
@@ -183,6 +207,70 @@ func (s *AlertaService) EnviarPendientes(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (s *AlertaService) construirCorreoAlertaDocumental(ctx context.Context, a models.Alerta) (string, string) {
+	asunto := asuntoPorDefectoAlertaDocumental
+	cuerpo := plantillaPorDefectoAlertaDocumental
+
+	if s.plantillaRepo != nil {
+		if p, err := s.plantillaRepo.ObtenerPorTipo(ctx, a.OrganizationID, "alerta_documental"); err == nil {
+			asunto = p.Asunto
+			cuerpo = p.CuerpoHTML
+		}
+	}
+
+	fechaVenc := ""
+	if a.DocumentoFechaVenc != nil {
+		fechaVenc = a.DocumentoFechaVenc.In(time.FixedZone("COT", -5*60*60)).Format("02 de January de 2006")
+	}
+	dias := ""
+	if a.DocumentoFechaVenc != nil {
+		d := models.DiasHasta(*a.DocumentoFechaVenc, time.Now())
+		if d < 0 {
+			dias = fmt.Sprintf("hace %d días", -d)
+		} else if d == 0 {
+			dias = "hoy"
+		} else {
+			dias = fmt.Sprintf("en %d días", d)
+		}
+	}
+
+	estadoTexto := "próximo a vencer"
+	if strings.EqualFold(a.TipoAlerta, "Critica") || strings.EqualFold(a.TipoAlerta, "Crítica") {
+		estadoTexto = "vencido"
+	}
+
+	dependencia := "Dependencia no asignada"
+	if depID, _, err := s.vehiculoRepo.ObtenerDependenciaYResponsable(ctx, a.VehiculoID); err == nil && depID != nil {
+		if dep, err := s.obtenerNombreDependencia(ctx, a.OrganizationID, *depID); err == nil && dep != "" {
+			dependencia = dep
+		}
+	}
+
+	replacer := strings.NewReplacer(
+		"{{placa}}", a.VehiculoPlaca,
+		"{{tipo_documento}}", a.TipoDocumentoNombre,
+		"{{dependencia}}", dependencia,
+		"{{fecha_vencimiento}}", fechaVenc,
+		"{{dias_para_vencer}}", dias,
+		"{{dias_para_vencer_texto}}", dias,
+		"{{estado_alerta}}", a.TipoAlerta,
+		"{{estado_alerta_texto}}", estadoTexto,
+		"{{correo_contacto}}", "Patio@funza-cundinamarca.gov.co",
+	)
+	return replacer.Replace(asunto), replacer.Replace(cuerpo)
+}
+
+func (s *AlertaService) obtenerNombreDependencia(ctx context.Context, organizationID, dependenciaID int) (string, error) {
+	if s.dependenciaRepo == nil {
+		return "", fmt.Errorf("dependenciaRepo no configurado")
+	}
+	dep, err := s.dependenciaRepo.GetByID(ctx, organizationID, dependenciaID)
+	if err != nil {
+		return "", err
+	}
+	return dep.Nombre, nil
 }
 
 func (s *AlertaService) ListarPorOrganizacion(ctx context.Context, organizationID int, soloPendientes bool) ([]models.Alerta, error) {

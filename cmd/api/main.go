@@ -110,7 +110,7 @@ func main() {
 	vehiculoSvc := service.NewVehiculoService(vehiculoRepo, historialRepo)
 	documentoSvc := service.NewDocumentoService(documentoRepo, historialRepo)
 	dashboardSvc := service.NewDashboardService(dashboardRepo)
-	alertaSvc := service.NewAlertaService(alertaRepo, documentoRepo, documentoSvc, vehiculoRepo, usuarioRepo, notificador)
+	alertaSvc := service.NewAlertaService(alertaRepo, documentoRepo, documentoSvc, vehiculoRepo, usuarioRepo, plantillaCorreoRepo, dependenciaRepo, notificador)
 	usuarioSvc := service.NewUsuarioService(usuarioRepo, catalogoRepo, historialRepo)
 	dependenciaSvc := service.NewDependenciaService(dependenciaRepo, historialRepo)
 	catalogoSvc := service.NewCatalogoService(catalogoRepo)
