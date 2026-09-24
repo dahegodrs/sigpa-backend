@@ -299,8 +299,8 @@ proximos AS (
 	FROM documentos d
 	WHERE d.organization_id = $1
 	  AND d.eliminado = FALSE
-	  AND d.estado_documento = 'ProximoAVencer'
 	  AND d.fecha_vencimiento IS NOT NULL
+	  AND d.fecha_vencimiento::date > CURRENT_DATE
 ),
 coinciden_hoy AS (
 	SELECT p.id
