@@ -91,6 +91,15 @@ func (s *ProgramacionService) Crear(ctx context.Context, p *models.Programacion)
 // la base de datos. La única forma de modificarla es que el director la
 // desbloquee explícitamente primero (endpoint Desbloquear).
 func (s *ProgramacionService) Actualizar(ctx context.Context, organizationID, id int, p *models.Programacion) error {
+	// Regla de consistencia de negocio:
+	// toda solicitud aprobada debe quedar marcada como programada para que
+	// siempre aparezca en la planilla oficial (PDF/PNG).
+	for i := range p.Items {
+		if p.Items[i].EstadoSolicitud == "aprobada" {
+			p.Items[i].Programado = true
+		}
+	}
+
 	actual, err := s.repo.Obtener(ctx, organizationID, id)
 	if err == nil {
 		bloqueadas := map[int]models.ProgramacionItem{}
