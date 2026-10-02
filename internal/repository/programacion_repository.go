@@ -617,7 +617,7 @@ func (r *ProgramacionRepository) listarItems(ctx context.Context, programacionID
 		       pi.es_vacaciones, pi.programado, pi.orden,
 		       pi.motivo, pi.origen, pi.solicitante_nombre, pi.solicitante_email,
 		       TO_CHAR(pi.hora_solicitada, 'HH24:MI') AS hora_solicitada, pi.punto_encuentro,
-		       pi.estado_solicitud, pi.motivo_rechazo,
+		       pi.estado_solicitud, pi.motivo_rechazo, pi.notificado_en,
 		       pi.tipo_vehiculo_solicitado_id, COALESCE(tv.nombre, '') AS tipo_vehiculo_solicitado_nombre
 		FROM programacion_items pi
 		LEFT JOIN vehiculos v ON v.id = pi.vehiculo_id
@@ -641,7 +641,7 @@ func (r *ProgramacionRepository) listarItems(ctx context.Context, programacionID
 			&item.EsVacaciones, &item.Programado, &item.Orden,
 			&item.Motivo, &item.Origen, &item.SolicitanteNombre, &item.SolicitanteEmail,
 			&horaSolicitada, &item.PuntoEncuentro,
-			&item.EstadoSolicitud, &item.MotivoRechazo,
+			&item.EstadoSolicitud, &item.MotivoRechazo, &item.NotificadoEn,
 			&item.TipoVehiculoSolicitadoID, &item.TipoVehiculoSolicitadoNombre,
 		); err != nil {
 			return nil, err
