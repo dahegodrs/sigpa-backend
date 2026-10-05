@@ -111,10 +111,27 @@ func (s *ProgramacionService) Actualizar(ctx context.Context, organizationID, id
 		if len(bloqueadas) > 0 {
 			for i, it := range p.Items {
 				if original, existe := bloqueadas[it.ID]; existe {
-					// Se conserva la fila original completa — el
-					// frontend puede haber enviado cambios, pero al
-					// estar notificada no se le permite modificarla.
-					p.Items[i] = original
+					// Fila ya notificada:
+					// 1) Se conserva trazabilidad crítica (estado, motivo, fecha notificación, origen/solicitante).
+					// 2) Se permite corregir datos operativos (vehículo, conductor, dependencia, destino, horarios, actividad)
+					//    para casos reales de reasignación posterior.
+					// 3) Si sigue aprobada, se fuerza programado=true.
+					merged := original
+					merged.VehiculoID = it.VehiculoID
+					merged.Conductor = it.Conductor
+					merged.Dependencia = it.Dependencia
+					merged.Destino = it.Destino
+					merged.HoraSalidaPunto = it.HoraSalidaPunto
+					merged.HoraFinalizacion = it.HoraFinalizacion
+					merged.Actividad = it.Actividad
+					merged.EsVacaciones = it.EsVacaciones
+					merged.Programado = it.Programado
+					merged.Orden = it.Orden
+
+					if merged.EstadoSolicitud == "aprobada" {
+						merged.Programado = true
+					}
+					p.Items[i] = merged
 				}
 			}
 		}
