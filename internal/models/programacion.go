@@ -96,6 +96,10 @@ type ProgramacionItem struct {
 	// nuevo, y permite agrupar en un solo correo todas las filas de un
 	// mismo solicitante que aún no se le han notificado.
 	NotificadoEn *time.Time `json:"notificado_en,omitempty" db:"notificado_en"`
+	// CanceladoEn marca si el propio solicitante canceló esta fila — a
+	// diferencia de "rechazada" (decisión del director), "cancelada" es
+	// una decisión del solicitante sobre su propia solicitud.
+	CanceladoEn *time.Time `json:"cancelado_en,omitempty" db:"cancelado_en"`
 }
 
 // PlantillaCorreo es una plantilla de correo configurable por organización

@@ -191,6 +191,18 @@ func (s *ProgramacionService) RechazarItem(ctx context.Context, itemID int, moti
 	return s.repo.ActualizarEstadoItem(ctx, itemID, "rechazada", &motivo)
 }
 
+// CancelarSolicitud permite que el propio Solicitante cancele su
+// solicitud (pendiente o aprobada, mientras la fecha del servicio no haya
+// pasado). A diferencia de RechazarItem (acción exclusiva del
+// Administrador/director), esta acción solo puede ejecutarla el dueño de
+// la fila — el repositorio valida que el email coincida con
+// solicitante_email. El cambio libera inmediatamente el vehículo/
+// conductor asignado, quedando reflejado al instante en "Editar
+// Programación" sin necesidad de ninguna notificación adicional.
+func (s *ProgramacionService) CancelarSolicitud(ctx context.Context, itemID int, email string) error {
+	return s.repo.CancelarItem(ctx, itemID, email)
+}
+
 // notificarDecisionesPendientes agrupa por solicitante_email todas las
 // filas de la programación que tienen una decisión tomada y aún no se les
 // ha notificado, y envía UN SOLO correo por solicitante con el detalle de

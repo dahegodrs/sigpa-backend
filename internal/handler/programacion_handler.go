@@ -485,6 +485,40 @@ func (h *ProgramacionHandler) RechazarSolicitud(c *gin.Context) {
 	response.Success(c, http.StatusOK, gin.H{"rechazado": true})
 }
 
+// PUT /api/v1/solicitudes-vehiculo/:itemId/cancelar
+// El propio Solicitante cancela su solicitud (pendiente o aprobada,
+// mientras la fecha del servicio no haya pasado). A diferencia de
+// rechazar (exclusivo del Administrador/director), esta acción solo la
+// puede ejecutar el dueño de la fila — se valida que el email del JWT
+// coincida con solicitante_email antes de permitir el cambio. El cambio
+// libera inmediatamente el vehículo/conductor asignado, reflejándose de
+// inmediato en "Editar Programación".
+func (h *ProgramacionHandler) CancelarSolicitud(c *gin.Context) {
+	email := middleware.Email(c)
+	itemID, err := strconv.Atoi(c.Param("itemId"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "id de item inválido")
+		return
+	}
+	if err := h.svc.CancelarSolicitud(c.Request.Context(), itemID, email); err != nil {
+		if errors.Is(err, apperrors.ErrNotFound) {
+			response.Error(c, http.StatusNotFound, "solicitud no encontrada")
+			return
+		}
+		if errors.Is(err, apperrors.ErrForbidden) {
+			response.Error(c, http.StatusForbidden, "no puedes cancelar una solicitud que no es tuya")
+			return
+		}
+		if errors.Is(err, apperrors.ErrConflicto) {
+			response.Error(c, http.StatusConflict, err.Error())
+			return
+		}
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.Success(c, http.StatusOK, gin.H{"cancelado": true})
+}
+
 // PUT /api/v1/programaciones/items/:itemId/desbloquear
 // Permite al director corregir una fila ya notificada (ej. el vehículo se
 // dañó y hay que reasignar otro). Es una acción explícita — se le informa

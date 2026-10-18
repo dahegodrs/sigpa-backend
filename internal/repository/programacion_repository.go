@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"regexp"
+	"time"
 
 	"github.com/alcaldia/sigpa-backend/internal/models"
 	"github.com/alcaldia/sigpa-backend/pkg/apperrors"
@@ -467,6 +468,64 @@ func (r *ProgramacionRepository) MarcarNotificados(ctx context.Context, itemIDs 
 	return nil
 }
 
+// CancelarItem permite que el propio solicitante cancele su solicitud
+// (pendiente o aprobada), siempre que la fecha del servicio no haya
+// pasado. A diferencia de "rechazar" (decisión del director), esta acción
+// la ejecuta el solicitante sobre su propia fila — se valida que el email
+// autenticado coincida con solicitante_email antes de permitir el cambio.
+//
+// Al cancelar, se libera inmediatamente el vehículo/conductor asignado
+// (si los había) para que el horario quede disponible en "Editar
+// Programación" sin que el director tenga que hacer nada manualmente.
+func (r *ProgramacionRepository) CancelarItem(ctx context.Context, itemID int, email string) error {
+	var solicitanteEmail sql.NullString
+	var estadoSolicitud string
+	var fecha string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT pi.solicitante_email, pi.estado_solicitud, TO_CHAR(p.fecha, 'YYYY-MM-DD')
+		FROM programacion_items pi
+		JOIN programaciones_vehiculos p ON p.id = pi.programacion_id
+		WHERE pi.id = $1
+	`, itemID).Scan(&solicitanteEmail, &estadoSolicitud, &fecha)
+	if err == sql.ErrNoRows {
+		return apperrors.ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("error al obtener item para cancelar: %w", err)
+	}
+
+	if !solicitanteEmail.Valid || solicitanteEmail.String != email {
+		return apperrors.ErrForbidden
+	}
+
+	if estadoSolicitud == "cancelada" || estadoSolicitud == "rechazada" {
+		return apperrors.NewConflictoError("esta solicitud ya no se puede cancelar porque está en estado '" + estadoSolicitud + "'")
+	}
+
+	hoy := time.Now().Format("2006-01-02")
+	if fecha < hoy {
+		return apperrors.NewConflictoError("no se puede cancelar una solicitud cuya fecha de servicio ya pasó")
+	}
+
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE programacion_items
+		SET estado_solicitud = 'cancelada',
+		    programado = FALSE,
+		    vehiculo_id = NULL,
+		    conductor = 'DISPONIBLE PATIO',
+		    cancelado_en = NOW()
+		WHERE id = $1
+	`, itemID)
+	if err != nil {
+		return fmt.Errorf("error al cancelar solicitud: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return apperrors.ErrNotFound
+	}
+	return nil
+}
+
 // Desbloquear limpia notificado_en de un item específico, permitiendo que
 // el director vuelva a editarlo/reaprobar/rechazarlo. Se usa cuando algo
 // cambió después de haber notificado al solicitante (ej. el vehículo se
@@ -549,7 +608,7 @@ func (r *ProgramacionRepository) ListarSolicitudesPorEmail(ctx context.Context, 
 		       pi.es_vacaciones, pi.programado, pi.orden,
 		       pi.motivo, pi.origen, pi.solicitante_nombre, pi.solicitante_email,
 		       TO_CHAR(pi.hora_solicitada, 'HH24:MI') AS hora_solicitada, pi.punto_encuentro,
-		       pi.estado_solicitud, pi.motivo_rechazo,
+		       pi.estado_solicitud, pi.motivo_rechazo, pi.cancelado_en,
 		       TO_CHAR(p.fecha, 'YYYY-MM-DD') AS fecha_programacion
 		FROM programacion_items pi
 		JOIN programaciones_vehiculos p ON p.id = pi.programacion_id
@@ -578,7 +637,7 @@ func (r *ProgramacionRepository) ListarSolicitudesPorEmail(ctx context.Context, 
 			&item.EsVacaciones, &item.Programado, &item.Orden,
 			&item.Motivo, &item.Origen, &item.SolicitanteNombre, &item.SolicitanteEmail,
 			&horaSolicitada, &item.PuntoEncuentro,
-			&item.EstadoSolicitud, &item.MotivoRechazo, &fechaProgramacion,
+			&item.EstadoSolicitud, &item.MotivoRechazo, &item.CanceladoEn, &fechaProgramacion,
 		); err != nil {
 			return nil, 0, err
 		}

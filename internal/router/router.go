@@ -197,6 +197,12 @@ func Setup(cfg *config.Config, corsOrigins []string, h Handlers) *gin.Engine {
 			{
 				solicitudes.POST("", h.Programacion.SolicitarVehiculo)
 				solicitudes.GET("/mias", h.Programacion.MisSolicitudes)
+				// Cancelar: acción exclusiva del propio Solicitante sobre su
+				// propia fila (el handler valida que el email del JWT
+				// coincida con solicitante_email) — no requiere rol
+				// específico porque cualquier usuario autenticado puede
+				// tener solicitudes propias que cancelar.
+				solicitudes.PUT("/:itemId/cancelar", h.Programacion.CancelarSolicitud)
 			}
 		}
 	}
