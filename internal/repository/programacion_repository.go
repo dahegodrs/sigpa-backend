@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/alcaldia/sigpa-backend/internal/models"
@@ -494,7 +495,13 @@ func (r *ProgramacionRepository) CancelarItem(ctx context.Context, itemID int, e
 		return fmt.Errorf("error al obtener item para cancelar: %w", err)
 	}
 
-	if !solicitanteEmail.Valid || solicitanteEmail.String != email {
+	// Comparación case-insensitive y sin espacios: el email guardado en la
+	// solicitud (tal como se escribió en el momento de crearla) puede no
+	// coincidir byte a byte con el que trae el JWT en sesiones futuras
+	// (ej. "Nombre@Dominio.com" vs "nombre@dominio.com"), aunque sea la
+	// misma persona — bloquear la cancelación por esto sería un falso
+	// negativo de seguridad, no un caso real de suplantación.
+	if !solicitanteEmail.Valid || !strings.EqualFold(strings.TrimSpace(solicitanteEmail.String), strings.TrimSpace(email)) {
 		return apperrors.ErrForbidden
 	}
 
