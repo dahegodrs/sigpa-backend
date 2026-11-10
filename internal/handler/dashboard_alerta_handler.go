@@ -85,6 +85,31 @@ func (h *AlertaHandler) MarcarLeida(c *gin.Context) {
 	response.Success(c, http.StatusOK, gin.H{"leida": true})
 }
 
+// PUT /api/v1/alertas/:id/descartar
+// Descarta una alerta activa. A diferencia de "marcar leída" (que solo
+// cambia el badge visual), "descartar" elimina la alerta del Centro de
+// Alertas y registra quién la descartó y cuándo, para trazabilidad.
+// El motor diario puede volver a generarla si el documento sigue sin
+// renovarse.
+func (h *AlertaHandler) DescartarAlerta(c *gin.Context) {
+	orgID := middleware.OrganizationID(c)
+	userID := middleware.UserID(c)
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "id inválido")
+		return
+	}
+	if err := h.service.DescartarAlerta(c.Request.Context(), orgID, id, userID); err != nil {
+		if errors.Is(err, apperrors.ErrNotFound) {
+			response.Error(c, http.StatusNotFound, "alerta no encontrada o ya descartada")
+			return
+		}
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.Success(c, http.StatusOK, gin.H{"descartada": true})
+}
+
 // PUT /api/v1/alertas/marcar-todas-leidas
 func (h *AlertaHandler) MarcarTodasLeidas(c *gin.Context) {
 	orgID := middleware.OrganizationID(c)

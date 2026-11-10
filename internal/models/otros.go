@@ -17,6 +17,14 @@ type Alerta struct {
 	DetalleError    *string    `json:"detalle_error,omitempty" db:"detalle_error"`
 	Leida           bool       `json:"leida" db:"leida"`
 	FechaCreacion   time.Time  `json:"fecha_creacion" db:"fecha_creacion"`
+	// Descarte explícito — el Administrador puede descartar una alerta
+	// (aunque no sea el día del umbral) y el sistema la eliminará del
+	// Centro de Alertas, registrando quién la descartó y cuándo.
+	// Tras el descarte, si el documento sigue sin renovarse, el motor
+	// diario puede volver a generar una alerta nueva.
+	Descartada    bool       `json:"descartada" db:"descartada"`
+	DescartadaPor *int       `json:"descartada_por,omitempty" db:"descartada_por"`
+	FechaDescarte *time.Time `json:"fecha_descarte,omitempty" db:"fecha_descarte"`
 
 	// Campos enriquecidos vía JOIN (no se persisten en la tabla `alertas`,
 	// solo se completan al listar) — permiten mostrar mensajes claros como

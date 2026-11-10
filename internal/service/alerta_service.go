@@ -103,13 +103,20 @@ func (s *AlertaService) EjecutarRevisionDiaria(ctx context.Context) error {
 		}
 
 		for _, c := range config {
-			// Vencido (dias_antes = 0): alerta crítica diaria mientras siga vencido.
-			coincide := (c.DiasAntes == 0 && diasRestantes < 0) || (diasRestantes == c.DiasAntes)
+			// Nueva lógica por RANGO:
+			// • Vencido (dias_antes=0): alerta crítica si diasRestantes < 0.
+			//   Solo se genera si no hay ya una alerta activa (no descartada)
+			//   del mismo nivel — así el Administrador puede descartarla y
+			//   el motor la regenerará al día siguiente si sigue vencido.
+			// • Próximo: se genera si diasRestantes <= umbral (el doc ya
+			//   entró en la zona de riesgo de ese nivel), no solo el día
+			//   exacto. Una vez creada, no se duplica hasta que se descarte.
+			coincide := (c.DiasAntes == 0 && diasRestantes < 0) || (diasRestantes >= 0 && diasRestantes <= c.DiasAntes)
 			if !coincide {
 				continue
 			}
 
-			yaExiste, err := s.alertaRepo.YaExisteAlertaHoy(ctx, d.ID, c.Nivel)
+			yaExiste, err := s.alertaRepo.YaExisteAlertaActiva(ctx, d.ID, c.Nivel)
 			if err != nil || yaExiste {
 				continue
 			}
@@ -332,4 +339,11 @@ func (s *AlertaService) ActualizarConfig(ctx context.Context, organizationID, id
 
 func (s *AlertaService) EliminarConfig(ctx context.Context, organizationID, id int) error {
 	return s.alertaRepo.EliminarConfig(ctx, organizationID, id)
+}
+
+// DescartarAlerta marca una alerta como descartada con trazabilidad.
+// El motor diario puede volver a generarla si el documento sigue sin
+// renovarse.
+func (s *AlertaService) DescartarAlerta(ctx context.Context, organizationID, alertaID, usuarioID int) error {
+	return s.alertaRepo.DescartarAlerta(ctx, organizationID, alertaID, usuarioID)
 }

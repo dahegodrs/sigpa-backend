@@ -131,6 +131,7 @@ func Setup(cfg *config.Config, corsOrigins []string, h Handlers) *gin.Engine {
 					middleware.RequireRoles("Administrador"), h.Alerta.EjecutarRevisionManual)
 				alertas.PUT("/marcar-todas-leidas", h.Alerta.MarcarTodasLeidas)
 				alertas.PUT("/:id/leida", h.Alerta.MarcarLeida)
+				alertas.PUT("/:id/descartar", middleware.RequireRoles("Administrador", "Dependencia"), h.Alerta.DescartarAlerta)
 
 				alertas.GET("/config", h.Alerta.ListarConfig)
 				alertas.POST("/config", middleware.RequireRoles("Administrador"), h.Alerta.CrearConfig)

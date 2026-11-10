@@ -110,15 +110,12 @@ const alertaSelectBase = `
 // alertaSelectEnriquecido agrega los datos de vehículo y documento vía JOIN,
 // para que el frontend pueda mostrar mensajes claros ("SOAT vencido hace 5
 // días") sin tener que hacer una consulta adicional por cada alerta.
-//
-// Se usa INNER JOIN (en vez de LEFT JOIN) contra documentos, filtrando
-// además "d.eliminado = FALSE": así, cuando un documento se elimina
-// lógicamente, sus alertas dejan de aparecer automáticamente en el Centro
-// de Alertas y en el popup del Dashboard — sin borrar nada de la tabla
-// `alertas` (se conservan íntegras para auditoría, igual que el documento).
+// Incluye también los campos de descarte para que el frontend pueda
+// mostrar quién y cuándo descartó cada alerta.
 const alertaSelectEnriquecido = `
 	SELECT a.id, a.organization_id, a.vehiculo_id, a.documento_id, a.tipo_alerta, a.canal,
 		a.fecha_programada, a.fecha_envio, a.destinatario, a.estado_envio, a.detalle_error, a.leida, a.fecha_creacion,
+		a.descartada, a.descartada_por, a.fecha_descarte,
 		COALESCE(v.placa, '') AS vehiculo_placa,
 		COALESCE(td.nombre, '') AS tipo_documento_nombre,
 		d.fecha_vencimiento AS documento_fecha_vencimiento
@@ -149,6 +146,7 @@ func scanAlertaEnriquecida(row interface {
 	err := row.Scan(
 		&a.ID, &a.OrganizationID, &a.VehiculoID, &a.DocumentoID, &a.TipoAlerta, &a.Canal,
 		&a.FechaProgramada, &a.FechaEnvio, &a.Destinatario, &a.EstadoEnvio, &a.DetalleError, &a.Leida, &a.FechaCreacion,
+		&a.Descartada, &a.DescartadaPor, &a.FechaDescarte,
 		&a.VehiculoPlaca, &a.TipoDocumentoNombre, &a.DocumentoFechaVenc,
 	)
 	if err != nil {
@@ -157,11 +155,15 @@ func scanAlertaEnriquecida(row interface {
 	return &a, nil
 }
 
-// YaExisteAlertaHoy evita duplicar el envío del mismo nivel de alerta el mismo día.
-func (r *AlertaRepository) YaExisteAlertaHoy(ctx context.Context, documentoID int, nivel string) (bool, error) {
+// YaExisteAlertaActiva verifica si ya existe una alerta NO descartada para
+// ese documento y nivel — impide duplicar cuando el motor corre en días
+// consecutivos dentro del mismo rango de umbral.
+// Nueva lógica "por rango": una alerta se genera si diasRestantes <= umbral
+// Y no existe ya una alerta activa (no descartada) del mismo nivel.
+func (r *AlertaRepository) YaExisteAlertaActiva(ctx context.Context, documentoID int, nivel string) (bool, error) {
 	query := `
 		SELECT COUNT(*) FROM alertas
-		WHERE documento_id = $1 AND tipo_alerta = $2 AND fecha_programada = CURRENT_DATE
+		WHERE documento_id = $1 AND tipo_alerta = $2 AND descartada = FALSE
 	`
 	var count int
 	if err := r.db.QueryRowContext(ctx, query, documentoID, nivel).Scan(&count); err != nil {
@@ -170,14 +172,39 @@ func (r *AlertaRepository) YaExisteAlertaHoy(ctx context.Context, documentoID in
 	return count > 0, nil
 }
 
+// YaExisteAlertaHoy — alias de compatibilidad con la lógica anterior.
+// Redirige a YaExisteAlertaActiva para usar la nueva semántica por rango.
+func (r *AlertaRepository) YaExisteAlertaHoy(ctx context.Context, documentoID int, nivel string) (bool, error) {
+	return r.YaExisteAlertaActiva(ctx, documentoID, nivel)
+}
+
+// DescartarAlerta marca una alerta como descartada con trazabilidad completa.
+// Después del descarte, si el documento sigue sin renovarse, el motor diario
+// puede volver a generar una nueva alerta del mismo nivel.
+func (r *AlertaRepository) DescartarAlerta(ctx context.Context, organizationID, alertaID, usuarioID int) error {
+	result, err := r.db.ExecContext(ctx, `
+		UPDATE alertas
+		SET descartada = TRUE, descartada_por = $1, fecha_descarte = NOW(), leida = TRUE
+		WHERE id = $2 AND organization_id = $3 AND descartada = FALSE
+	`, usuarioID, alertaID, organizationID)
+	if err != nil {
+		return fmt.Errorf("error al descartar alerta: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return apperrors.ErrNotFound
+	}
+	return nil
+}
+
 // Crear inserta una nueva alerta pendiente de envío.
 func (r *AlertaRepository) Crear(ctx context.Context, a *models.Alerta) (int, error) {
 	query := `
 		INSERT INTO alertas (
 			organization_id, vehiculo_id, documento_id, tipo_alerta, canal,
-			fecha_programada, destinatario, estado_envio, leida
+			fecha_programada, destinatario, estado_envio, leida, descartada
 		)
-		VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6, 'Pendiente', FALSE)
+		VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6, 'Pendiente', FALSE, FALSE)
 		RETURNING id
 	`
 	var newID int
@@ -227,16 +254,15 @@ func (r *AlertaRepository) MarcarResultado(ctx context.Context, id int, exito bo
 	return nil
 }
 
-// ListarPorOrganizacion retorna alertas recientes para el panel de alertas del
-// frontend, enriquecidas con placa del vehículo, tipo de documento y fecha
-// de vencimiento real, para poder mostrar mensajes específicos en vez de un
-// genérico "Documento vencido".
+// ListarPorOrganizacion retorna alertas activas (no descartadas) para el
+// Centro de Alertas del frontend, enriquecidas con placa, tipo de documento
+// y fecha de vencimiento.
 func (r *AlertaRepository) ListarPorOrganizacion(ctx context.Context, organizationID int, soloPendientes bool) ([]models.Alerta, error) {
-	query := alertaSelectEnriquecido + " WHERE a.organization_id = $1"
+	// Solo alertas no descartadas — las descartadas van al historial interno
+	// y no deben ocupar espacio en el Centro de Alertas activo.
+	query := alertaSelectEnriquecido + " WHERE a.organization_id = $1 AND a.descartada = FALSE"
 	if soloPendientes {
-		// "Pendientes" para UI significa no leídas, no "estado_envio = Pendiente".
-		// Las alertas pasan a estado_envio='Enviada' inmediatamente después del job,
-		// por eso el popup y módulo quedaban vacíos aunque sí se hubieran generado.
+		// "Pendientes" para UI = no leídas (no "estado_envio = Pendiente").
 		query += " AND a.leida = FALSE"
 	}
 	query += " ORDER BY a.fecha_programada DESC, a.fecha_creacion DESC"
@@ -273,20 +299,15 @@ func (r *AlertaRepository) MarcarLeida(ctx context.Context, organizationID, id i
 
 // MarcarTodasLeidas marca como leídas todas las alertas pendientes de lectura de la organización.
 func (r *AlertaRepository) MarcarTodasLeidas(ctx context.Context, organizationID int) error {
-	_, err := r.db.ExecContext(ctx, "UPDATE alertas SET leida = TRUE WHERE organization_id = $1 AND leida = FALSE", organizationID)
+	_, err := r.db.ExecContext(ctx, "UPDATE alertas SET leida = TRUE WHERE organization_id = $1 AND leida = FALSE AND descartada = FALSE", organizationID)
 	if err != nil {
 		return fmt.Errorf("error al marcar todas las alertas como leídas: %w", err)
 	}
 	return nil
 }
 
-// ObtenerCoberturaHoy resume la diferencia entre:
-//   - inventario documental próximo a vencer (estado_documento), y
-//   - eventos de alerta efectivamente generados hoy por reglas.
-//
-// Esto permite explicar operacionalmente por qué puede haber más documentos
-// "próximos" que alertas del día (solo coinciden los que caen en umbrales
-// configurados hoy: 45/30/15/7/1/0).
+// ObtenerCoberturaHoy resume la cobertura del motor de alertas:
+// cuántos documentos próximos a vencer tienen ya una alerta activa hoy.
 func (r *AlertaRepository) ObtenerCoberturaHoy(ctx context.Context, organizationID int) (*models.CoberturaAlertas, error) {
 	const q = `
 WITH reglas AS (
@@ -305,13 +326,14 @@ proximos AS (
 coinciden_hoy AS (
 	SELECT p.id
 	FROM proximos p
-	JOIN reglas r ON (p.fecha_venc - CURRENT_DATE) = r.dias_antes
+	JOIN reglas r ON (p.fecha_venc - CURRENT_DATE) <= r.dias_antes
+	GROUP BY p.id
 ),
 alertados_hoy AS (
 	SELECT DISTINCT a.documento_id
 	FROM alertas a
 	WHERE a.organization_id = $1
-	  AND a.fecha_programada = CURRENT_DATE
+	  AND a.descartada = FALSE
 )
 SELECT
 	(SELECT COUNT(*) FROM proximos) AS proximos_total,
