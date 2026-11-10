@@ -93,6 +93,17 @@ func (s *DocumentoService) ConteoPorTipo(ctx context.Context, organizationID int
 	return s.repo.ConteoPorTipo(ctx, organizationID)
 }
 
+// VencimientosPorMes expone el reporte de documentos cuya fecha de vencimiento
+// cae en el mes indicado — usado por la pantalla Reportes.
+func (s *DocumentoService) VencimientosPorMes(ctx context.Context, organizationID, anio, mes int, tipo string) ([]repository.VencimientoMensualItem, error) {
+	return s.repo.VencimientosPorMes(ctx, repository.VencimientosMensualFiltro{
+		OrganizationID: organizationID,
+		Anio:           anio,
+		Mes:            mes,
+		TipoDocumento:  tipo,
+	})
+}
+
 // EliminarLogico marca el documento como eliminado y registra el evento en
 // el historial de cambios, sin borrar nada de Google Drive.
 func (s *DocumentoService) EliminarLogico(ctx context.Context, organizationID, documentoID, usuarioID int) error {

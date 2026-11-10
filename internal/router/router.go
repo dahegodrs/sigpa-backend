@@ -144,6 +144,7 @@ func Setup(cfg *config.Config, corsOrigins []string, h Handlers) *gin.Engine {
 			{
 				documentos.GET("", h.Documento.ListarGlobal)
 				documentos.GET("/conteo-por-tipo", h.Documento.ConteoPorTipo)
+				documentos.GET("/vencimientos-por-mes", h.Documento.VencimientosPorMes)
 			}
 
 			// Listas configurables (conductores, actividades, etc.)

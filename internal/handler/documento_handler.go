@@ -274,6 +274,27 @@ func (h *DocumentoHandler) NotificarDocumento(c *gin.Context) {
 	response.Success(c, http.StatusOK, gin.H{"enviado": true})
 }
 
+// GET /api/v1/documentos/vencimientos-por-mes?anio=2026&mes=11&tipo=SOAT
+// Reporte de documentos cuya fecha de vencimiento cae en el mes indicado,
+// con detalle de placa, dependencia y días restantes. Si no se pasa mes,
+// devuelve todo el año. Accesible a Administrador, Dependencia y Gerencia.
+func (h *DocumentoHandler) VencimientosPorMes(c *gin.Context) {
+	orgID := middleware.OrganizationID(c)
+	anio, _ := strconv.Atoi(c.Query("anio"))
+	mes, _ := strconv.Atoi(c.Query("mes"))
+	tipo := c.Query("tipo")
+
+	items, err := h.service.VencimientosPorMes(c.Request.Context(), orgID, anio, mes, tipo)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if items == nil {
+		items = []repository.VencimientoMensualItem{}
+	}
+	response.Success(c, http.StatusOK, items)
+}
+
 // GET /api/v1/documentos/conteo-por-tipo
 // Alimenta las tarjetas de "carpetas" (SOAT, Tecnomecánica, etc.) con
 // cantidad real de archivos y tamaño total ocupado.

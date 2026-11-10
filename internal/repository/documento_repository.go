@@ -337,6 +337,104 @@ func (r *DocumentoRepository) ConteoPorTipo(ctx context.Context, organizationID 
 	return resultados, nil
 }
 
+// VencimientoMensualItem representa el detalle de un documento próximo a vencer,
+// agrupado para el reporte "Próximos a vencer por mes".
+type VencimientoMensualItem struct {
+	TipoDocumento    string `json:"tipo_documento"`
+	Placa            string `json:"placa"`
+	Dependencia      string `json:"dependencia"`
+	FechaVencimiento string `json:"fecha_vencimiento"`
+	DiasRestantes    int    `json:"dias_restantes"`
+	EstadoDocumento  string `json:"estado_documento"`
+}
+
+// VencimientosMensualFiltro permite filtrar el reporte por mes/año y tipo.
+type VencimientosMensualFiltro struct {
+	OrganizationID int
+	Anio           int
+	Mes            int    // 0 = todos
+	TipoDocumento  string // "" = todos
+	SoloPorMes     bool   // true: filtra solo el mes dado; false: lista hasta el fin del mes dado (ej. hasta fin de noviembre)
+}
+
+// VencimientosPorMes retorna los documentos cuya fecha de vencimiento cae
+// dentro del mes/año indicado (o en los próximos N días si SoloPorMes=false),
+// con detalle de placa, dependencia y días restantes.
+// Se usa en el nuevo reporte "Próximos a vencer por mes" de la pantalla Reportes.
+func (r *DocumentoRepository) VencimientosPorMes(ctx context.Context, f VencimientosMensualFiltro) ([]VencimientoMensualItem, error) {
+	conditions := []string{
+		"d.organization_id = $1",
+		"d.vigente_actual = TRUE",
+		"d.eliminado = FALSE",
+		"d.fecha_vencimiento IS NOT NULL",
+		"LOWER(TRIM(td.nombre)) <> 'tarjeta de propiedad'",
+	}
+	args := []interface{}{f.OrganizationID}
+	argPos := 2
+
+	if f.Anio > 0 && f.Mes > 0 {
+		// Rango exacto del mes
+		conditions = append(conditions,
+			fmt.Sprintf("EXTRACT(YEAR FROM d.fecha_vencimiento) = $%d", argPos),
+			fmt.Sprintf("EXTRACT(MONTH FROM d.fecha_vencimiento) = $%d", argPos+1),
+		)
+		args = append(args, f.Anio, f.Mes)
+		argPos += 2
+	} else if f.Anio > 0 {
+		// Solo filtrar por año
+		conditions = append(conditions, fmt.Sprintf("EXTRACT(YEAR FROM d.fecha_vencimiento) = $%d", argPos))
+		args = append(args, f.Anio)
+		argPos++
+	}
+
+	if f.TipoDocumento != "" {
+		conditions = append(conditions, fmt.Sprintf("LOWER(TRIM(td.nombre)) = LOWER(TRIM($%d))", argPos))
+		args = append(args, f.TipoDocumento)
+		argPos++
+	}
+
+	whereClause := strings.Join(conditions, " AND ")
+
+	query := fmt.Sprintf(`
+		SELECT
+			td.nombre AS tipo_documento,
+			v.placa,
+			COALESCE(dep.nombre, '—') AS dependencia,
+			TO_CHAR(d.fecha_vencimiento, 'YYYY-MM-DD') AS fecha_vencimiento,
+			(d.fecha_vencimiento::date - CURRENT_DATE) AS dias_restantes,
+			d.estado_documento
+		FROM documentos d
+		INNER JOIN tipos_documento td ON td.id = d.tipo_documento_id
+		INNER JOIN vehiculos v ON v.id = d.vehiculo_id
+		LEFT JOIN dependencias dep ON dep.id = v.dependencia_id
+		WHERE %s
+		ORDER BY d.fecha_vencimiento ASC, td.nombre, v.placa
+	`, whereClause)
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("error al obtener vencimientos por mes: %w", err)
+	}
+	defer rows.Close()
+
+	var resultado []VencimientoMensualItem
+	for rows.Next() {
+		var item VencimientoMensualItem
+		if err := rows.Scan(
+			&item.TipoDocumento,
+			&item.Placa,
+			&item.Dependencia,
+			&item.FechaVencimiento,
+			&item.DiasRestantes,
+			&item.EstadoDocumento,
+		); err != nil {
+			return nil, err
+		}
+		resultado = append(resultado, item)
+	}
+	return resultado, nil
+}
+
 // EliminarLogico marca un documento como eliminado (borrado lógico), sin
 // removerlo de la base de datos ni del archivo en Google Drive. Se conserva
 // para trazabilidad/auditoría, tal como se requiere en el manejo documental
