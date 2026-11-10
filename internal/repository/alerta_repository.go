@@ -178,17 +178,38 @@ func (r *AlertaRepository) YaExisteAlertaHoy(ctx context.Context, documentoID in
 	return r.YaExisteAlertaActiva(ctx, documentoID, nivel)
 }
 
-// DescartarAlerta marca una alerta como descartada con trazabilidad completa.
-// Después del descarte, si el documento sigue sin renovarse, el motor diario
-// puede volver a generar una nueva alerta del mismo nivel.
+// DescartarAlerta marca como descartadas TODAS las filas del mismo
+// documento + nivel para esta organización, no solo la fila representante
+// que devuelve DISTINCT ON.
+//
+// Contexto: por cada alerta se crea una fila por destinatario de correo
+// (ej. 6 destinatarios → 6 filas con el mismo documento_id + tipo_alerta).
+// Al mostrar en UI se usa DISTINCT ON para agrupar en una sola tarjeta,
+// pero al descartar es necesario marcar todas las filas del grupo para que
+// no vuelvan a aparecer al recargar la página.
 func (r *AlertaRepository) DescartarAlerta(ctx context.Context, organizationID, alertaID, usuarioID int) error {
+	// Paso 1: obtener documento_id + tipo_alerta de la alerta indicada.
+	var documentoID int
+	var tipoAlerta string
+	err := r.db.QueryRowContext(ctx,
+		"SELECT documento_id, tipo_alerta FROM alertas WHERE id = $1 AND organization_id = $2",
+		alertaID, organizationID,
+	).Scan(&documentoID, &tipoAlerta)
+	if err == sql.ErrNoRows {
+		return apperrors.ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("error al obtener datos de la alerta: %w", err)
+	}
+
+	// Paso 2: descartar todo el grupo (mismo documento + nivel).
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE alertas
 		SET descartada = TRUE, descartada_por = $1, fecha_descarte = NOW(), leida = TRUE
-		WHERE id = $2 AND organization_id = $3 AND descartada = FALSE
-	`, usuarioID, alertaID, organizationID)
+		WHERE organization_id = $2 AND documento_id = $3 AND tipo_alerta = $4 AND descartada = FALSE
+	`, usuarioID, organizationID, documentoID, tipoAlerta)
 	if err != nil {
-		return fmt.Errorf("error al descartar alerta: %w", err)
+		return fmt.Errorf("error al descartar alertas del grupo: %w", err)
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
