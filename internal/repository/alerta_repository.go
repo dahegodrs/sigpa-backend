@@ -257,15 +257,37 @@ func (r *AlertaRepository) MarcarResultado(ctx context.Context, id int, exito bo
 // ListarPorOrganizacion retorna alertas activas (no descartadas) para el
 // Centro de Alertas del frontend, enriquecidas con placa, tipo de documento
 // y fecha de vencimiento.
+//
+// Agrupación visual: aunque en BD existen N filas por alerta (una por
+// destinatario de correo), el Centro de Alertas debe mostrar UNA SOLA
+// tarjeta por documento/nivel — el usuario no necesita ver "SOAT vencido"
+// repetido 6 veces porque se envió a 6 correos distintos.
+// Se usa DISTINCT ON (documento_id, tipo_alerta) para colapsar, eligiendo
+// la fila con el id más alto (más reciente) de cada grupo.
 func (r *AlertaRepository) ListarPorOrganizacion(ctx context.Context, organizationID int, soloPendientes bool) ([]models.Alerta, error) {
-	// Solo alertas no descartadas — las descartadas van al historial interno
-	// y no deben ocupar espacio en el Centro de Alertas activo.
-	query := alertaSelectEnriquecido + " WHERE a.organization_id = $1 AND a.descartada = FALSE"
+	// Subconsulta con DISTINCT ON para colapsar filas duplicadas por destinatario.
+	// El ORDER BY interno (documento_id, tipo_alerta, id DESC) asegura que
+	// DISTINCT ON tome siempre la fila más reciente por grupo.
+	pendientesClause := ""
 	if soloPendientes {
-		// "Pendientes" para UI = no leídas (no "estado_envio = Pendiente").
-		query += " AND a.leida = FALSE"
+		pendientesClause = " AND a.leida = FALSE"
 	}
-	query += " ORDER BY a.fecha_programada DESC, a.fecha_creacion DESC"
+
+	query := fmt.Sprintf(`
+		SELECT DISTINCT ON (a.documento_id, a.tipo_alerta)
+			a.id, a.organization_id, a.vehiculo_id, a.documento_id, a.tipo_alerta, a.canal,
+			a.fecha_programada, a.fecha_envio, a.destinatario, a.estado_envio, a.detalle_error, a.leida, a.fecha_creacion,
+			a.descartada, a.descartada_por, a.fecha_descarte,
+			COALESCE(v.placa, '') AS vehiculo_placa,
+			COALESCE(td.nombre, '') AS tipo_documento_nombre,
+			d.fecha_vencimiento AS documento_fecha_vencimiento
+		FROM alertas a
+		LEFT JOIN vehiculos v ON v.id = a.vehiculo_id
+		INNER JOIN documentos d ON d.id = a.documento_id AND d.eliminado = FALSE
+		LEFT JOIN tipos_documento td ON td.id = d.tipo_documento_id
+		WHERE a.organization_id = $1 AND a.descartada = FALSE%s
+		ORDER BY a.documento_id, a.tipo_alerta, a.id DESC
+	`, pendientesClause)
 
 	rows, err := r.db.QueryContext(ctx, query, organizationID)
 	if err != nil {
@@ -280,6 +302,11 @@ func (r *AlertaRepository) ListarPorOrganizacion(ctx context.Context, organizati
 			return nil, err
 		}
 		alertas = append(alertas, *a)
+	}
+	// Re-ordenar por fecha_programada DESC para mantener orden descendente
+	// (DISTINCT ON fuerza un ORDER BY que no es el deseado para presentación).
+	for i, j := 0, len(alertas)-1; i < j; i, j = i+1, j-1 {
+		alertas[i], alertas[j] = alertas[j], alertas[i]
 	}
 	return alertas, nil
 }
